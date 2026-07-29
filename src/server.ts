@@ -165,7 +165,7 @@ async function seedDatabase() {
             logger.info('Database already contains records. Skipping seed.');
         }
     } catch (error) {
-        logger.error('Error seeding database:', error);
+        logger.error(error as any, 'Error seeding database:');
     }
 }
 
@@ -221,7 +221,7 @@ app.post('/auth/login', async (req: express.Request, res: express.Response) => {
             user: userWithoutPassword
         });
     } catch (error) {
-        logger.error('Login error:', error);
+        logger.error(error as any, 'Login error:');
         res.status(500).json({ message: 'Internal server error during authentication' });
     }
 });
@@ -267,7 +267,7 @@ app.get('/projects', async (req: express.Request, res: express.Response) => {
         });
         res.json(projects);
     } catch (error) {
-        logger.error('Get projects error:', error);
+        logger.error(error as any, 'Get projects error:');
         res.status(500).json({ message: 'Internal server error' });
     }
 });
@@ -299,7 +299,7 @@ app.get('/documents', async (req: express.Request, res: express.Response) => {
         });
         res.json(documents);
     } catch (error) {
-        logger.error('Get documents error:', error);
+        logger.error(error as any, 'Get documents error:');
         res.status(500).json({ message: 'Internal server error' });
     }
 });
@@ -337,7 +337,7 @@ app.get('/documents/:id', async (req: express.Request, res: express.Response) =>
 
         res.json(document);
     } catch (error) {
-        logger.error('Get document detail error:', error);
+        logger.error(error as any, 'Get document detail error:');
         res.status(500).json({ message: 'Internal server error' });
     }
 });
@@ -376,7 +376,7 @@ app.post('/documents', async (req: express.Request, res: express.Response) => {
         });
         res.status(201).json(document);
     } catch (error) {
-        logger.error('Create document error:', error);
+        logger.error(error as any, 'Create document error:');
         res.status(500).json({ message: 'Internal server error' });
     }
 });
@@ -431,7 +431,7 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
 
         res.json(updatedDoc);
     } catch (error) {
-        logger.error('Sign document error:', error);
+        logger.error(error as any, 'Sign document error:');
         res.status(500).json({ message: 'Internal server error' });
     }
 });
@@ -478,7 +478,7 @@ app.post('/documents/:id/anchor', async (req: express.Request, res: express.Resp
 
         res.json(updatedDoc);
     } catch (error) {
-        logger.error('Anchor document error:', error);
+        logger.error(error as any, 'Anchor document error:');
         res.status(500).json({ message: 'Internal server error' });
     }
 });
@@ -526,7 +526,7 @@ app.post('/verify', async (req: express.Request, res: express.Response) => {
             document
         });
     } catch (error) {
-        logger.error('Verify error:', error);
+        logger.error(error as any, 'Verify error:');
         res.status(500).json({ message: 'Internal server error' });
     }
 });
