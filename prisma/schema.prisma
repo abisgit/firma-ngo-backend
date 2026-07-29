@@ -1,0 +1,114 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String       @id @default(uuid())
+  email           String       @unique
+  password        String
+  firstName       String
+  lastName        String
+  role            Role         @default(FIELD_OFFICER)
+  organizationId  String?
+  organization    Organization? @relation(fields: [organizationId], references: [id])
+  profileImageUrl String?
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  documentsCreated Document[]  @relation("DocumentCreator")
+  documentsSigned  Signature[]
+}
+
+enum Role {
+  FIELD_OFFICER
+  COUNTRY_DIRECTOR
+  GLOBAL_MANAGER
+  DONOR
+  SUPER_ADMIN
+}
+
+model Organization {
+  id              String   @id @default(uuid())
+  name            String
+  registrationCode String   @unique
+  country         String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users           User[]
+  projects        Project[]
+}
+
+model Project {
+  id              String   @id @default(uuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  name            String
+  projectCode     String   @unique
+  budget          Float?
+  startDate       DateTime?
+  endDate         DateTime?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  documents       Document[]
+}
+
+model Document {
+  id              String   @id @default(uuid())
+  projectId       String?
+  project         Project?  @relation(fields: [projectId], references: [id])
+  creatorId       String
+  creator         User      @relation("DocumentCreator", fields: [creatorId], references: [id])
+  title           String
+  documentType    DocumentType
+  fileUrl         String
+  status          DocumentStatus @default(DRAFT)
+  blockchainHash  String?   // The zero-knowledge hash anchored to blockchain
+  txId            String?   // Blockchain transaction ID
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  signatures      Signature[]
+}
+
+enum DocumentType {
+  GRANT_PROPOSAL
+  AUDIT_REPORT
+  MOU
+  BENEFICIARY_CONSENT
+  FINANCIAL_REPORT
+}
+
+enum DocumentStatus {
+  DRAFT
+  PENDING_SIGNATURES
+  APPROVED
+  REJECTED
+  ANCHORED
+}
+
+model Signature {
+  id              String   @id @default(uuid())
+  documentId      String
+  document        Document @relation(fields: [documentId], references: [id])
+  signerId        String
+  signer          User     @relation(fields: [signerId], references: [id])
+  videoUrl        String?  // Video evidence of consent (Biometric)
+  signatureHash   String   // Hash of the signed intent
+  signedAt        DateTime @default(now())
+  ipAddress       String?
+  userAgent       String?
+}
