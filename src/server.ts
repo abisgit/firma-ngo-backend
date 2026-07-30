@@ -19,9 +19,17 @@ const logger = pino({ transport: { target: 'pino-pretty' } });
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'firma_ngo_secret_key_2026';
 
-app.use(cors());
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
+}));
+app.options('*', cors() as any);
+
 app.use(helmet({
     contentSecurityPolicy: false, // For easier dev environment testing
+    crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 app.use(morgan('dev'));
 app.use(express.json());
