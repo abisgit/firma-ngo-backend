@@ -5,7 +5,7 @@ import morgan from 'morgan';
 import dotenv from 'dotenv';
 import pino from 'pino';
 import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import path from 'path';
@@ -35,7 +35,7 @@ app.use(morgan('dev'));
 app.use(express.json());
 
 // Ensure uploads folder exists
-const uploadsDir = path.join(__dirname, '../uploads');
+const uploadsDir = process.env.VERCEL === '1' ? '/tmp/uploads' : path.join(__dirname, '../uploads');
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
