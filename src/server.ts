@@ -643,6 +643,10 @@ app.post('/verify/file', upload.single('file'), async (req: express.Request, res
 
 const PORT = process.env.PORT || 3004;
 
-app.listen(PORT, () => {
-    logger.info(`NGO Backend running on port ${PORT}`);
-});
+if (process.env.VERCEL !== '1') {
+    app.listen(PORT, () => {
+        logger.info(`NGO Backend running on port ${PORT}`);
+    });
+}
+
+export default app;
