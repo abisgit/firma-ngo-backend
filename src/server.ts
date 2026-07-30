@@ -8,6 +8,9 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import path from 'path';
+import fs from 'fs';
+import multer from 'multer';
 
 dotenv.config();
 
@@ -22,6 +25,25 @@ app.use(helmet({
 }));
 app.use(morgan('dev'));
 app.use(express.json());
+
+// Ensure uploads folder exists
+const uploadsDir = path.join(__dirname, '../uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsDir));
+
+// Multer storage config
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+        cb(null, uniqueSuffix + '-' + file.originalname);
+    }
+});
+const upload = multer({ storage });
 
 // Helper to authenticate request and get User ID
 const getUserIdFromHeader = (req: express.Request) => {
@@ -40,23 +62,28 @@ const getUserIdFromHeader = (req: express.Request) => {
 // Seed default users & projects if none exist
 async function seedDatabase() {
     try {
-        const userCount = await prisma.user.count();
-        if (userCount === 0) {
-            logger.info('No users found in database. Seeding default NGO users...');
-            
-            // Create default organization
-            const defaultOrg = await prisma.organization.create({
+        // Ensure default organization exists
+        let defaultOrg = await prisma.organization.findFirst({
+            where: { name: 'Hope International Ethiopia' }
+        });
+        if (!defaultOrg) {
+            defaultOrg = await prisma.organization.create({
                 data: {
                     name: 'Hope International Ethiopia',
                     registrationCode: 'NGO-ETH-2026-001',
                     country: 'Ethiopia',
                 }
             });
+            logger.info('Default NGO organization created.');
+        }
 
+        // Ensure default users exist
+        const userCount = await prisma.user.count();
+        let users: any[] = [];
+        if (userCount === 0) {
+            logger.info('No users found in database. Seeding default NGO users...');
             const hashedPassword = await bcrypt.hash('admin123', 10);
-
-            // Create users
-            const users = await prisma.$transaction([
+            users = await prisma.$transaction([
                 prisma.user.create({
                     data: {
                         email: 'admin@firma-ngo.org',
@@ -108,10 +135,14 @@ async function seedDatabase() {
                     }
                 })
             ]);
-
             logger.info('Default NGO users seeded successfully.');
+        } else {
+            users = await prisma.user.findMany();
+        }
 
-            // Create default projects
+        // Ensure default projects exist
+        const projectCount = await prisma.project.count();
+        if (projectCount === 0) {
             logger.info('Seeding default projects...');
             const project1 = await prisma.project.create({
                 data: {
@@ -148,21 +179,22 @@ async function seedDatabase() {
 
             logger.info('Default projects seeded successfully.');
 
-            // Seed a default document to show history immediately
-            logger.info('Seeding initial documents...');
-            await prisma.document.create({
-                data: {
-                    projectId: project1.id,
-                    creatorId: users[3]!.id, // Field Officer (Tariku)
-                    title: 'Food Security Q1 Assessment Report',
-                    documentType: 'GRANT_PROPOSAL',
-                    fileUrl: '/uploads/dummy_proposal.pdf',
-                    status: 'DRAFT',
-                }
-            });
-            logger.info('Initial documents seeded successfully.');
-        } else {
-            logger.info('Database already contains records. Skipping seed.');
+            // Seed a default document
+            const officerUser = users.find(u => u.role === 'FIELD_OFFICER');
+            if (officerUser) {
+                logger.info('Seeding initial documents...');
+                await prisma.document.create({
+                    data: {
+                        projectId: project1.id,
+                        creatorId: officerUser.id,
+                        title: 'Food Security Q1 Assessment Report',
+                        documentType: 'GRANT_PROPOSAL',
+                        fileUrl: '/uploads/dummy_proposal.pdf',
+                        status: 'DRAFT',
+                    }
+                });
+                logger.info('Initial documents seeded successfully.');
+            }
         }
     } catch (error) {
         logger.error(error as any, 'Error seeding database:');
@@ -340,6 +372,17 @@ app.get('/documents/:id', async (req: express.Request, res: express.Response) =>
         logger.error(error as any, 'Get document detail error:');
         res.status(500).json({ message: 'Internal server error' });
     }
+});
+
+// POST /upload - Upload a document file
+app.post('/upload', upload.single('file'), (req: express.Request, res: express.Response) => {
+    if (!req.file) {
+        res.status(400).json({ message: 'No file uploaded' });
+        return;
+    }
+    // Return relative URL so it works in both local and production
+    const fileUrl = `/uploads/${req.file.filename}`;
+    res.json({ fileUrl });
 });
 
 // POST /documents - Create a new document draft
@@ -527,6 +570,60 @@ app.post('/verify', async (req: express.Request, res: express.Response) => {
         });
     } catch (error) {
         logger.error(error as any, 'Verify error:');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// POST /verify/file - public verification API using uploaded file (calculates file hash and verifies authenticity)
+app.post('/verify/file', upload.single('file'), async (req: express.Request, res: express.Response) => {
+    if (!req.file) {
+        res.status(400).json({ message: 'No file uploaded for scanning' });
+        return;
+    }
+
+    try {
+        // Read file buffer and compute SHA-256 hash
+        const fileBuffer = fs.readFileSync(req.file.path);
+        const hashSum = crypto.createHash('sha256');
+        hashSum.update(fileBuffer);
+        const fileHash = hashSum.digest('hex');
+
+        logger.info(`Scanning file: ${req.file.originalname}, computed hash: ${fileHash}`);
+
+        // Clean up the uploaded temp file
+        fs.unlinkSync(req.file.path);
+
+        const document = await prisma.document.findFirst({
+            where: {
+                blockchainHash: fileHash
+            },
+            include: {
+                project: true,
+                creator: {
+                    select: { firstName: true, lastName: true, role: true }
+                },
+                signatures: {
+                    include: {
+                        signer: {
+                            select: { firstName: true, lastName: true, role: true }
+                        }
+                    }
+                }
+            }
+        });
+
+        if (!document) {
+            res.status(404).json({ verified: false, computedHash: fileHash, message: 'No matching anchored record found on the ledger. The file content might have been modified.' });
+            return;
+        }
+
+        res.json({
+            verified: true,
+            computedHash: fileHash,
+            document
+        });
+    } catch (error) {
+        logger.error(error as any, 'Verify file error:');
         res.status(500).json({ message: 'Internal server error' });
     }
 });
