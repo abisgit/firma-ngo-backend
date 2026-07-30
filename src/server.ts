@@ -15,7 +15,7 @@ import multer from 'multer';
 dotenv.config();
 
 const app = express();
-const logger = pino({ transport: { target: 'pino-pretty' } });
+const logger = process.env.VERCEL === '1' ? pino() : pino({ transport: { target: 'pino-pretty' } });
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'firma_ngo_secret_key_2026';
 
