@@ -209,11 +209,23 @@ async function seedDatabase() {
     }
 }
 
-seedDatabase();
+if (process.env.VERCEL !== '1') {
+    seedDatabase();
+}
 
 // Root route
 app.get('/', (req, res) => {
     res.send('FIRMA NGO Backend Service is running.');
+});
+
+// Seed endpoint
+app.post('/api/seed', async (req, res) => {
+    try {
+        await seedDatabase();
+        res.json({ status: 'success', message: 'Database seeded successfully.' });
+    } catch (err: any) {
+        res.status(500).json({ status: 'error', message: err.message });
+    }
 });
 
 // Health Check
