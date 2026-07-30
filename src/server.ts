@@ -211,6 +211,11 @@ async function seedDatabase() {
 
 seedDatabase();
 
+// Root route
+app.get('/', (req, res) => {
+    res.send('FIRMA NGO Backend Service is running.');
+});
+
 // Health Check
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', service: 'firma-ngo-backend' });
