@@ -653,6 +653,52 @@ app.post('/verify/file', upload.single('file'), async (req: express.Request, res
     }
 });
 
+// INTERNAL API: Provision NGO Tenant
+app.post('/api/internal/tenants', async (req: express.Request, res: express.Response) => {
+    const { orgName, orgCode, contactPerson, officialEmail, password } = req.body;
+    const internalSecret = req.headers['x-internal-secret'];
+    
+    if (internalSecret !== (process.env.INTERNAL_SECRET || 'firma_internal_secure_123')) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+    }
+    
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const names = contactPerson ? contactPerson.split(' ') : ['Admin', ''];
+        const firstName = names[0];
+        const lastName = names.slice(1).join(' ') || 'User';
+
+        let newOrg = await prisma.organization.findUnique({
+            where: { registrationCode: orgCode }
+        });
+
+        if (!newOrg) {
+            newOrg = await prisma.organization.create({
+                data: {
+                    name: orgName,
+                    registrationCode: orgCode,
+                    country: 'Unknown',
+                    users: {
+                        create: {
+                            email: officialEmail,
+                            password: hashedPassword,
+                            firstName,
+                            lastName,
+                            role: 'SUPER_ADMIN'
+                        }
+                    }
+                }
+            });
+        }
+        
+        res.status(201).json({ success: true, organizationId: newOrg.id });
+    } catch (err: any) {
+        logger.error(err as any, 'Error provisioning internal tenant');
+        res.status(500).json({ message: 'Failed to provision tenant' });
+    }
+});
+
 const PORT = process.env.PORT || 3004;
 
 if (process.env.VERCEL !== '1') {
