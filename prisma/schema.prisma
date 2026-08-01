@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["driverAdapters"]
@@ -18,23 +15,25 @@ model User {
   password        String
   firstName       String
   lastName        String
-  role            Role         @default(FIELD_OFFICER)
+  role            Role         @default(DOCTOR)
   organizationId  String?
   organization    Organization? @relation(fields: [organizationId], references: [id])
+  departmentId    String?
+  department      Department?   @relation(fields: [departmentId], references: [id])
   profileImageUrl String?
   isActive        Boolean      @default(true)
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  documentsCreated Document[]  @relation("DocumentCreator")
-  documentsSigned  Signature[]
+  doctor          Doctor?
 }
 
 enum Role {
-  FIELD_OFFICER
-  COUNTRY_DIRECTOR
-  GLOBAL_MANAGER
-  DONOR
+  DOCTOR
+  NURSE
+  ADMIN
+  ORG_ADMIN
+  PATIENT
   SUPER_ADMIN
 }
 
@@ -48,68 +47,249 @@ model Organization {
   updatedAt       DateTime @updatedAt
 
   users           User[]
-  projects        Project[]
+  patients        Patient[]
+  doctors         Doctor[]
+  appointments    Appointment[]
+  medicalRecords  MedicalRecord[]
+  prescriptions   Prescription[]
+  medicines       Medicine[]
+  labTests        LabTest[]
+  transactions    HealthcareTransaction[]
+  departments     Department[]
+  doctorQualifications DoctorQualification[]
+  doctorSpecializations DoctorSpecialization[]
+  doctorDocuments  DoctorDocument[]
 }
 
-model Project {
-  id              String   @id @default(uuid())
+model Patient {
+  id             String                  @id @default(uuid())
+  patientId      String                  @unique
+  fullName       String
+  age            Int
+  gender         String
+  bloodGroup     String
+  lastVisit      DateTime?
+  status         String                  @default("Outpatient")
+  department     String
+  dateOfBirth    DateTime?
+  maritalStatus  String?
+  address        String?
+  photoUrl       String?
+  criticalInfo   Json?                   @default("{}")
+  organizationId String
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  appointments   Appointment[]
+  transactions   HealthcareTransaction[]
+  medicalRecords MedicalRecord[]
+  organization   Organization            @relation(fields: [organizationId], references: [id])
+  prescriptions  Prescription[]
+}
+
+model Doctor {
+  id               String                @id @default(uuid())
+  fullName         String
+  doctorCode       String                @unique
+  specialty        String
+  qualificationId  String?
+  specializationId String?
+  departmentId     String?
+  consultationType String                @default("In-person")
+  consultationFee  Float                 @default(0)
+  workInfo         Json?                 @default("{}")
+  privateInfo      Json?                 @default("{}")
+  doctorInfo       Json?                 @default("{}")
+  hospitalRole     String                @default("Physician")
+  status           String                @default("Active")
+  phone            String?
+  email            String?
+  userId           String?               @unique
+  organizationId   String
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  appointments     Appointment[]
+  department       Department?           @relation(fields: [departmentId], references: [id])
+  organization     Organization          @relation(fields: [organizationId], references: [id])
+  qualification    DoctorQualification?  @relation(fields: [qualificationId], references: [id])
+  specialization   DoctorSpecialization? @relation(fields: [specializationId], references: [id])
+  user             User?                 @relation(fields: [userId], references: [id])
+  documents        DoctorDocument[]
+  medicalRecords   MedicalRecord[]
+  prescriptions    Prescription[]
+}
+
+model Appointment {
+  id                String         @id @default(uuid())
+  appointmentId     String         @unique @default(cuid())
+  patientId         String
+  doctorId          String
+  startDatetime     DateTime
+  endDatetime       DateTime?
+  timeSlot          String?
+  type              String         @default("Checkup")
+  state             String         @default("Draft")
+  isFollowUp        Boolean        @default(false)
+  consultationNotes String?
+  amountDue         Float          @default(0)
+  paymentStatus     String         @default("Not Paid")
+  medicalRecordId   String?
+  organizationId    String
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  doctor            Doctor         @relation(fields: [doctorId], references: [id])
+  medicalRecord     MedicalRecord? @relation(fields: [medicalRecordId], references: [id])
+  organization      Organization   @relation(fields: [organizationId], references: [id])
+  patient           Patient        @relation(fields: [patientId], references: [id])
+  prescriptions     Prescription[]
+}
+
+model Medicine {
+  id                String             @id @default(uuid())
+  name              String
+  category          String
+  stock             Int                @default(0)
+  expiryDate        DateTime
+  status            String             @default("Available")
+  organizationId    String
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  commonUse         String?
+  details           String?
+  form              String?            @default("Tablet")
+  strength          String?            @default("N/A")
+  price             Float              @default(0.0)
+  organization      Organization       @relation(fields: [organizationId], references: [id])
+  prescriptionItems PrescriptionItem[]
+}
+
+model LabTest {
+  id             String       @id @default(uuid())
+  testName       String
+  patientName    String
+  status         String       @default("Pending")
+  priority       String       @default("Medium")
+  result         String?
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+}
+
+model HealthcareTransaction {
+  id              String       @id @default(uuid())
+  patientId       String?
+  patientName     String
+  service         String
+  amount          Float
+  status          String       @default("Paid")
+  transactionDate DateTime     @default(now())
   organizationId  String
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
   organization    Organization @relation(fields: [organizationId], references: [id])
-  name            String
-  projectCode     String   @unique
-  budget          Float?
-  startDate       DateTime?
-  endDate         DateTime?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  documents       Document[]
+  patient         Patient?     @relation(fields: [patientId], references: [id])
 }
 
-model Document {
-  id              String   @id @default(uuid())
-  projectId       String?
-  project         Project?  @relation(fields: [projectId], references: [id])
-  creatorId       String
-  creator         User      @relation("DocumentCreator", fields: [creatorId], references: [id])
-  title           String
-  documentType    DocumentType
-  fileUrl         String
-  status          DocumentStatus @default(DRAFT)
-  blockchainHash  String?   // The zero-knowledge hash anchored to blockchain
-  txId            String?   // Blockchain transaction ID
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  signatures      Signature[]
+model Prescription {
+  id             String             @id @default(uuid())
+  prescriptionId String             @unique
+  patientId      String
+  doctorId       String
+  appointmentId  String?
+  notes          String?
+  status         String             @default("Pending")
+  dateIssued     DateTime           @default(now())
+  organizationId String
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  appointment    Appointment?       @relation(fields: [appointmentId], references: [id])
+  doctor         Doctor             @relation(fields: [doctorId], references: [id])
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  patient        Patient            @relation(fields: [patientId], references: [id])
+  items          PrescriptionItem[]
 }
 
-enum DocumentType {
-  GRANT_PROPOSAL
-  AUDIT_REPORT
-  MOU
-  BENEFICIARY_CONSENT
-  FINANCIAL_REPORT
+model PrescriptionItem {
+  id             String       @id @default(uuid())
+  prescriptionId String
+  medicineId     String
+  dosage         String
+  frequency      String
+  duration       String
+  instructions   String?
+  medicine       Medicine     @relation(fields: [medicineId], references: [id])
+  prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
 }
 
-enum DocumentStatus {
-  DRAFT
-  PENDING_SIGNATURES
-  APPROVED
-  REJECTED
-  ANCHORED
+model Department {
+  id                 String       @id @default(uuid())
+  name               String
+  isDoctorDepartment Boolean      @default(false)
+  organizationId     String
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  organization       Organization @relation(fields: [organizationId], references: [id])
+  doctors            Doctor[]
+  users              User[]
+
+  parentId       String?
+  parent         Department?  @relation("DepartmentToSubDepartments", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  subDepartments Department[] @relation("DepartmentToSubDepartments")
+
+  @@unique([name, organizationId])
 }
 
-model Signature {
-  id              String   @id @default(uuid())
-  documentId      String
-  document        Document @relation(fields: [documentId], references: [id])
-  signerId        String
-  signer          User     @relation(fields: [signerId], references: [id])
-  videoUrl        String?  // Video evidence of consent (Biometric)
-  signatureHash   String   // Hash of the signed intent
-  signedAt        DateTime @default(now())
-  ipAddress       String?
-  userAgent       String?
+model DoctorQualification {
+  id             String       @id @default(uuid())
+  name           String
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  doctors        Doctor[]
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([name, organizationId])
+}
+
+model DoctorSpecialization {
+  id             String       @id @default(uuid())
+  name           String
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  doctors        Doctor[]
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([name, organizationId])
+}
+
+model DoctorDocument {
+  id                String       @id @default(uuid())
+  doctorId          String
+  qualification     String?
+  documentDetails   String?
+  licenseNumber     String?
+  licenseExpiryDate DateTime?
+  organizationId    String
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  doctor            Doctor       @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  organization      Organization @relation(fields: [organizationId], references: [id])
+}
+
+model MedicalRecord {
+  id             String        @id @default(uuid())
+  patientId      String
+  doctorId       String
+  diagnosis      String
+  treatment      String?
+  status         String        @default("Completed")
+  visitDate      DateTime      @default(now())
+  organizationId String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  appointments   Appointment[]
+  doctor         Doctor        @relation(fields: [doctorId], references: [id])
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  patient        Patient       @relation(fields: [patientId], references: [id])
 }
