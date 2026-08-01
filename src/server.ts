@@ -391,6 +391,53 @@ app.get('/projects', async (req: express.Request, res: express.Response) => {
     }
 });
 
+// POST /projects - Create a new project
+app.post('/projects', async (req: express.Request, res: express.Response) => {
+    const userId = getUserIdFromHeader(req);
+    if (!userId) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+    }
+
+    try {
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user || !user.organizationId) {
+            res.status(403).json({ message: 'User does not belong to an organization' });
+            return;
+        }
+
+        const { name, projectCode, budget, startDate, endDate } = req.body;
+
+        if (!name || !projectCode) {
+            res.status(400).json({ message: 'Project name and code are required' });
+            return;
+        }
+
+        // Ensure unique project code globally (could be scoped by org in future)
+        const existing = await prisma.project.findUnique({ where: { projectCode } });
+        if (existing) {
+            res.status(409).json({ message: 'Project code already in use' });
+            return;
+        }
+
+        const newProject = await prisma.project.create({
+            data: {
+                name,
+                projectCode,
+                budget: budget ? parseFloat(budget) : null,
+                startDate: startDate ? new Date(startDate) : null,
+                endDate: endDate ? new Date(endDate) : null,
+                organizationId: user.organizationId
+            }
+        });
+
+        res.status(201).json(newProject);
+    } catch (error) {
+        logger.error(error as any, 'Create project error:');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
 // GET /documents - Get document list
 app.get('/documents', async (req: express.Request, res: express.Response) => {
     const userId = getUserIdFromHeader(req);
