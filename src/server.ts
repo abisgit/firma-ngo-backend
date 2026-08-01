@@ -371,8 +371,17 @@ app.get('/projects', async (req: express.Request, res: express.Response) => {
     }
 
     try {
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user || !user.organizationId) {
+            res.json([]);
+            return;
+        }
+
         const projects = await prisma.project.findMany({
-            where: { isActive: true },
+            where: { 
+                isActive: true,
+                organizationId: user.organizationId
+            },
             orderBy: { createdAt: 'desc' }
         });
         res.json(projects);
@@ -391,7 +400,18 @@ app.get('/documents', async (req: express.Request, res: express.Response) => {
     }
 
     try {
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user || !user.organizationId) {
+            res.json([]);
+            return;
+        }
+
         const documents = await prisma.document.findMany({
+            where: {
+                creator: {
+                    organizationId: user.organizationId
+                }
+            },
             include: {
                 project: true,
                 creator: {
