@@ -243,18 +243,71 @@ app.post('/auth/login', async (req: express.Request, res: express.Response) => {
     }
 
     try {
-        const user = await prisma.user.findUnique({
+        let user = await prisma.user.findUnique({
             where: { email },
             include: { organization: true }
         });
 
-        if (!user) {
-            res.status(401).json({ message: 'Invalid email or password' });
-            return;
+        if (!user || !(await bcrypt.compare(password, user.password))) {
+            // SSO Fallback: Try central FIRMA API
+            try {
+                const centralRes = await fetch('https://api.firmasafe.com/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                if (centralRes.ok) {
+                    const data = await centralRes.json() as any;
+                    const centralUser = data.user;
+
+                    if (centralUser && centralUser.organization) {
+                        const names = centralUser.fullName.split(' ');
+                        const firstName = names[0];
+                        const lastName = names.slice(1).join(' ') || 'User';
+
+                        // Upsert Organization
+                        const org = await prisma.organization.upsert({
+                            where: { registrationCode: centralUser.organization.code },
+                            update: {
+                                name: centralUser.organization.name,
+                            },
+                            create: {
+                                name: centralUser.organization.name,
+                                registrationCode: centralUser.organization.code,
+                                country: 'Unknown'
+                            }
+                        });
+
+                        // Upsert User
+                        const hashedPassword = await bcrypt.hash(password, 10);
+                        user = await prisma.user.upsert({
+                            where: { email },
+                            update: {
+                                password: hashedPassword,
+                                firstName,
+                                lastName,
+                                role: centralUser.role === 'ORG_ADMIN' ? 'SUPER_ADMIN' : 'FIELD_OFFICER',
+                                organizationId: org.id
+                            },
+                            create: {
+                                email,
+                                password: hashedPassword,
+                                firstName,
+                                lastName,
+                                role: centralUser.role === 'ORG_ADMIN' ? 'SUPER_ADMIN' : 'FIELD_OFFICER',
+                                organizationId: org.id
+                            },
+                            include: { organization: true }
+                        });
+                    }
+                }
+            } catch (err) {
+                logger.error(err as any, 'SSO fallback failed');
+            }
         }
 
-        const isPasswordValid = await bcrypt.compare(password, user.password);
-        if (!isPasswordValid) {
+        if (!user || !(await bcrypt.compare(password, user.password))) {
             res.status(401).json({ message: 'Invalid email or password' });
             return;
         }
@@ -278,8 +331,8 @@ app.post('/auth/login', async (req: express.Request, res: express.Response) => {
             user: userWithoutPassword
         });
     } catch (error) {
-        logger.error(error as any, 'Login error:');
-        res.status(500).json({ message: 'Internal server error during authentication' });
+        logger.error(error as any, 'Login error');
+        res.status(500).json({ message: 'Internal server error' });
     }
 });
 
