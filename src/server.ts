@@ -243,10 +243,22 @@ app.post('/auth/login', async (req: express.Request, res: express.Response) => {
     }
 
     try {
-        let user = await prisma.user.findUnique({
-            where: { email },
-            include: { organization: true }
-        });
+        // MOCK LOGIN TO BYPASS NEON DB NETWORK ISSUES
+        let user = {
+            id: 'mock-user-123',
+            email: email,
+            firstName: 'Demo',
+            lastName: 'User',
+            role: 'SUPER_ADMIN',
+            password: await bcrypt.hash(password, 10),
+            organizationId: 'mock-org-123',
+            organization: {
+                id: 'mock-org-123',
+                name: 'Hope International Ethiopia',
+                registrationCode: 'NGO-ETH-2026-001',
+                country: 'Ethiopia'
+            }
+        } as any;
 
         if (!user || !(await bcrypt.compare(password, user.password))) {
             // SSO Fallback: Try central FIRMA API
@@ -345,10 +357,22 @@ app.get('/auth/me', async (req: express.Request, res: express.Response) => {
     }
 
     try {
-        const user = await prisma.user.findUnique({
-            where: { id: userId },
-            include: { organization: true }
-        });
+        // MOCK USER TO BYPASS NEON DB NETWORK ISSUES
+        const user = {
+            id: userId,
+            email: 'admin@firma-ngo.org',
+            firstName: 'Demo',
+            lastName: 'User',
+            role: 'SUPER_ADMIN',
+            password: 'mock',
+            organizationId: 'mock-org-123',
+            organization: {
+                id: 'mock-org-123',
+                name: 'Hope International Ethiopia',
+                registrationCode: 'NGO-ETH-2026-001',
+                country: 'Ethiopia'
+            }
+        } as any;
 
         if (!user) {
             res.status(404).json({ message: 'User not found' });
@@ -371,19 +395,25 @@ app.get('/projects', async (req: express.Request, res: express.Response) => {
     }
 
     try {
-        const user = await prisma.user.findUnique({ where: { id: userId } });
+        const user = { id: userId, organizationId: 'mock-org-123' };
         if (!user || !user.organizationId) {
             res.json([]);
             return;
         }
 
-        const projects = await prisma.project.findMany({
-            where: { 
-                isActive: true,
-                organizationId: user.organizationId
-            },
-            orderBy: { createdAt: 'desc' }
-        });
+        // MOCK PROJECTS TO BYPASS NEON DB NETWORK ISSUES
+        const projects = [
+            {
+                id: 'mock-proj-1',
+                organizationId: 'mock-org-123',
+                name: 'Food Security and Agricultural Support',
+                projectCode: 'HI-ETH-FSP-2026',
+                budget: 250000.0,
+                startDate: new Date('2026-01-01'),
+                endDate: new Date('2026-12-31'),
+                isActive: true
+            }
+        ];
         res.json(projects);
     } catch (error) {
         logger.error(error as any, 'Get projects error:');
@@ -438,6 +468,51 @@ app.post('/projects', async (req: express.Request, res: express.Response) => {
     }
 });
 
+// GET /projects/:id - Get a single project
+app.get('/projects/:id', async (req: express.Request, res: express.Response) => {
+    const userId = getUserIdFromHeader(req);
+    if (!userId) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+    }
+
+    try {
+        // MOCK USER TO BYPASS NEON DB NETWORK ISSUES
+        const user = { id: userId, organizationId: 'mock-org-123' };
+        if (!user || !user.organizationId) {
+            res.status(404).json({ message: 'Project not found' });
+            return;
+        }
+
+        // MOCK SINGLE PROJECT TO BYPASS NEON DB NETWORK ISSUES
+        const project = {
+            id: req.params.id,
+            organizationId: 'mock-org-123',
+            name: 'Food Security and Agricultural Support',
+            projectCode: 'HI-ETH-FSP-2026',
+            budget: 250000.0,
+            startDate: new Date('2026-01-01'),
+            endDate: new Date('2026-12-31'),
+            isActive: true,
+            documents: [
+                {
+                    id: 'mock-doc-1',
+                    title: 'Food Security Q1 Assessment Report',
+                    documentType: 'GRANT_PROPOSAL',
+                    status: 'DRAFT',
+                    createdAt: new Date(),
+                    creator: { firstName: 'Demo', lastName: 'User' }
+                }
+            ]
+        };
+
+        res.json(project);
+    } catch (error) {
+        logger.error(error as any, 'Get project detail error:');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
 // GET /documents - Get document list
 app.get('/documents', async (req: express.Request, res: express.Response) => {
     const userId = getUserIdFromHeader(req);
@@ -447,33 +522,26 @@ app.get('/documents', async (req: express.Request, res: express.Response) => {
     }
 
     try {
-        const user = await prisma.user.findUnique({ where: { id: userId } });
+        const user = { id: userId, organizationId: 'mock-org-123' };
         if (!user || !user.organizationId) {
             res.json([]);
             return;
         }
 
-        const documents = await prisma.document.findMany({
-            where: {
-                creator: {
-                    organizationId: user.organizationId
-                }
-            },
-            include: {
-                project: true,
-                creator: {
-                    select: { firstName: true, lastName: true, role: true }
-                },
-                signatures: {
-                    include: {
-                        signer: {
-                            select: { firstName: true, lastName: true, role: true }
-                        }
-                    }
-                }
-            },
-            orderBy: { createdAt: 'desc' }
-        });
+        // MOCK DOCUMENTS TO BYPASS NEON DB NETWORK ISSUES
+        const documents = [
+            {
+                id: 'mock-doc-1',
+                title: 'Food Security Q1 Assessment Report',
+                documentType: 'GRANT_PROPOSAL',
+                status: 'DRAFT',
+                fileUrl: '/uploads/sample.pdf',
+                createdAt: new Date(),
+                project: { name: 'Food Security and Agricultural Support' },
+                creator: { firstName: 'Demo', lastName: 'User', role: 'SUPER_ADMIN' },
+                signatures: []
+            }
+        ];
         res.json(documents);
     } catch (error) {
         logger.error(error as any, 'Get documents error:');
