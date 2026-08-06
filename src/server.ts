@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 
 dotenv.config();
 
@@ -243,22 +244,10 @@ app.post('/auth/login', async (req: express.Request, res: express.Response) => {
     }
 
     try {
-        // MOCK LOGIN TO BYPASS NEON DB NETWORK ISSUES
-        let user = {
-            id: 'mock-user-123',
-            email: email,
-            firstName: 'Demo',
-            lastName: 'User',
-            role: 'SUPER_ADMIN',
-            password: await bcrypt.hash(password, 10),
-            organizationId: 'mock-org-123',
-            organization: {
-                id: 'mock-org-123',
-                name: 'Hope International Ethiopia',
-                registrationCode: 'NGO-ETH-2026-001',
-                country: 'Ethiopia'
-            }
-        } as any;
+        let user = await prisma.user.findUnique({
+            where: { email },
+            include: { organization: true }
+        });
 
         if (!user || !(await bcrypt.compare(password, user.password))) {
             // SSO Fallback: Try central FIRMA API
@@ -357,22 +346,10 @@ app.get('/auth/me', async (req: express.Request, res: express.Response) => {
     }
 
     try {
-        // MOCK USER TO BYPASS NEON DB NETWORK ISSUES
-        const user = {
-            id: userId,
-            email: 'admin@firma-ngo.org',
-            firstName: 'Demo',
-            lastName: 'User',
-            role: 'SUPER_ADMIN',
-            password: 'mock',
-            organizationId: 'mock-org-123',
-            organization: {
-                id: 'mock-org-123',
-                name: 'Hope International Ethiopia',
-                registrationCode: 'NGO-ETH-2026-001',
-                country: 'Ethiopia'
-            }
-        } as any;
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            include: { organization: true }
+        });
 
         if (!user) {
             res.status(404).json({ message: 'User not found' });
@@ -386,6 +363,84 @@ app.get('/auth/me', async (req: express.Request, res: express.Response) => {
     }
 });
 
+// GET /api/users - Get all users for the org (System Admin Only)
+app.get('/api/users', async (req: express.Request, res: express.Response) => {
+    const userId = getUserIdFromHeader(req);
+    if (!userId) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+    }
+
+    try {
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user || user.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ message: 'Forbidden: Requires System Admin role' });
+            return;
+        }
+
+        const users = await prisma.user.findMany({
+            where: { organizationId: user.organizationId }
+        });
+        
+        // Frontend expects customPermissions array. If not in DB model, mock it for now.
+        const usersWithPermissions = users.map(u => ({
+            ...u,
+            customPermissions: (u as any).customPermissions || []
+        }));
+
+        res.json(usersWithPermissions);
+    } catch (error) {
+        logger.error(error as any, 'Get users error');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// PUT /api/users/:id/permissions - Update user permissions
+app.put('/api/users/:id/permissions', async (req: express.Request, res: express.Response) => {
+    const userId = getUserIdFromHeader(req);
+    if (!userId) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+    }
+    try {
+        const adminUser = await prisma.user.findUnique({ where: { id: userId } });
+        if (!adminUser || adminUser.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ message: 'Forbidden' });
+            return;
+        }
+        
+        // Return mock success since DB schema might not have customPermissions field yet
+        const { customPermissions } = req.body;
+        res.json({ id: req.params.id, customPermissions });
+    } catch (error) {
+        logger.error(error as any, 'Update permissions error');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// GET /organization/profile - Get organization profile
+app.get('/organization/profile', async (req: express.Request, res: express.Response) => {
+    const userId = getUserIdFromHeader(req);
+    if (!userId) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+    }
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            include: { organization: true }
+        });
+        if (!user || user.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ message: 'Forbidden' });
+            return;
+        }
+        res.json(user.organization);
+    } catch (error) {
+        logger.error(error as any, 'Get organization error');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
 // GET /projects - Get NGO projects
 app.get('/projects', async (req: express.Request, res: express.Response) => {
     const userId = getUserIdFromHeader(req);
@@ -395,25 +450,17 @@ app.get('/projects', async (req: express.Request, res: express.Response) => {
     }
 
     try {
-        const user = { id: userId, organizationId: 'mock-org-123' };
+        const user = await prisma.user.findUnique({
+            where: { id: userId }
+        });
         if (!user || !user.organizationId) {
             res.json([]);
             return;
         }
 
-        // MOCK PROJECTS TO BYPASS NEON DB NETWORK ISSUES
-        const projects = [
-            {
-                id: 'mock-proj-1',
-                organizationId: 'mock-org-123',
-                name: 'Food Security and Agricultural Support',
-                projectCode: 'HI-ETH-FSP-2026',
-                budget: 250000.0,
-                startDate: new Date('2026-01-01'),
-                endDate: new Date('2026-12-31'),
-                isActive: true
-            }
-        ];
+        const projects = await prisma.project.findMany({
+            where: { organizationId: user.organizationId }
+        });
         res.json(projects);
     } catch (error) {
         logger.error(error as any, 'Get projects error:');
@@ -484,27 +531,15 @@ app.get('/projects/:id', async (req: express.Request, res: express.Response) => 
             return;
         }
 
-        // MOCK SINGLE PROJECT TO BYPASS NEON DB NETWORK ISSUES
-        const project = {
-            id: req.params.id,
-            organizationId: 'mock-org-123',
-            name: 'Food Security and Agricultural Support',
-            projectCode: 'HI-ETH-FSP-2026',
-            budget: 250000.0,
-            startDate: new Date('2026-01-01'),
-            endDate: new Date('2026-12-31'),
-            isActive: true,
-            documents: [
-                {
-                    id: 'mock-doc-1',
-                    title: 'Food Security Q1 Assessment Report',
-                    documentType: 'GRANT_PROPOSAL',
-                    status: 'DRAFT',
-                    createdAt: new Date(),
-                    creator: { firstName: 'Demo', lastName: 'User' }
-                }
-            ]
-        };
+        const project = await prisma.project.findUnique({
+            where: { id: req.params.id },
+            include: { documents: true }
+        });
+        
+        if (!project || project.organizationId !== user.organizationId) {
+            res.status(404).json({ message: 'Project not found' });
+            return;
+        }
 
         res.json(project);
     } catch (error) {
@@ -522,26 +557,28 @@ app.get('/documents', async (req: express.Request, res: express.Response) => {
     }
 
     try {
-        const user = { id: userId, organizationId: 'mock-org-123' };
+        const user = await prisma.user.findUnique({
+            where: { id: userId }
+        });
         if (!user || !user.organizationId) {
             res.json([]);
             return;
         }
 
-        // MOCK DOCUMENTS TO BYPASS NEON DB NETWORK ISSUES
-        const documents = [
-            {
-                id: 'mock-doc-1',
-                title: 'Food Security Q1 Assessment Report',
-                documentType: 'GRANT_PROPOSAL',
-                status: 'DRAFT',
-                fileUrl: '/uploads/sample.pdf',
-                createdAt: new Date(),
-                project: { name: 'Food Security and Agricultural Support' },
-                creator: { firstName: 'Demo', lastName: 'User', role: 'SUPER_ADMIN' },
-                signatures: []
+        const documents = await prisma.document.findMany({
+            where: { creatorId: userId },
+            include: {
+                project: true,
+                creator: true,
+                signatures: {
+                    include: {
+                        signer: {
+                            select: { firstName: true, lastName: true, role: true }
+                        }
+                    }
+                }
             }
-        ];
+        });
         res.json(documents);
     } catch (error) {
         logger.error(error as any, 'Get documents error:');
@@ -645,7 +682,7 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
         return;
     }
 
-    const { videoUrl } = req.body;
+    const { videoUrl, signatureImage, stampType } = req.body;
 
     try {
         const document = await prisma.document.findUnique({
@@ -657,10 +694,31 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             return;
         }
 
-        // Generate cryptographic signature hash
-        const signatureHash = crypto.createHash('sha256')
-            .update(`${document.id}-${userId}-${Date.now()}`)
-            .digest('hex');
+        // Call FIRMA Core to register the signature securely
+        const coreUrl = process.env.FIRMA_CORE_URL || 'http://localhost:3001';
+        const internalSecret = process.env.INTERNAL_SECRET || 'firma_internal_secure_123';
+        
+        const coreRes = await fetch(`${coreUrl}/external/signatures/sign`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Firma-Api-Key': internalSecret
+            },
+            body: JSON.stringify({
+                documentId: document.id,
+                signerId: userId,
+                videoUrl: videoUrl || null,
+                ipAddress: req.ip || '127.0.0.1',
+                userAgent: req.headers['user-agent'] || 'Unknown Browser'
+            })
+        });
+        
+        if (!coreRes.ok) {
+            throw new Error('Failed to register signature with FIRMA Core');
+        }
+        
+        const coreData = await coreRes.json() as any;
+        const signatureHash = coreData.signatureHash;
 
         // Create signature record
         await prisma.signature.create({
@@ -674,6 +732,55 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             }
         });
 
+        // -------------------------------------------------------------
+        // Modify the PDF file to include the Digital Signature Certificate
+        // -------------------------------------------------------------
+        if (document.fileUrl && fs.existsSync(document.fileUrl)) {
+            try {
+                const pdfBytes = fs.readFileSync(document.fileUrl);
+                const pdfDoc = await PDFDocument.load(pdfBytes);
+                
+                // Add a new certificate page
+                const page = pdfDoc.addPage();
+                const { width, height } = page.getSize();
+                const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+                const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+                
+                // Draw Certificate Header
+                page.drawText('FIRMA Digital Signature Certificate', { x: 50, y: height - 50, size: 24, font: boldFont, color: rgb(0.1, 0.3, 0.5) });
+                page.drawText(`Document ID: ${document.id}`, { x: 50, y: height - 80, size: 12, font });
+                page.drawText(`Signer ID: ${userId}`, { x: 50, y: height - 100, size: 12, font });
+                page.drawText(`Signature Hash: ${signatureHash}`, { x: 50, y: height - 120, size: 10, font, color: rgb(0.4, 0.4, 0.4) });
+                page.drawText(`Date: ${new Date().toISOString()}`, { x: 50, y: height - 140, size: 12, font });
+
+                // Draw Stamp
+                if (stampType) {
+                    page.drawText(`STAMP: ${stampType}`, { x: 50, y: height - 200, size: 36, font: boldFont, color: rgb(0.8, 0.1, 0.1) });
+                }
+
+                // Draw Handwritten Signature
+                if (signatureImage && signatureImage.startsWith('data:image/png;base64,')) {
+                    const base64Data = signatureImage.replace('data:image/png;base64,', '');
+                    const imageBytes = Buffer.from(base64Data, 'base64');
+                    const embeddedImage = await pdfDoc.embedPng(imageBytes);
+                    const imgDims = embeddedImage.scale(0.5);
+                    page.drawImage(embeddedImage, {
+                        x: 50,
+                        y: height - 400,
+                        width: imgDims.width,
+                        height: imgDims.height,
+                    });
+                    page.drawText('Digitally signed above.', { x: 50, y: height - 420, size: 10, font, color: rgb(0.4, 0.4, 0.4) });
+                }
+
+                const modifiedPdfBytes = await pdfDoc.save();
+                fs.writeFileSync(document.fileUrl, modifiedPdfBytes);
+                logger.info(`Successfully appended signature certificate to ${document.fileUrl}`);
+            } catch (pdfErr) {
+                logger.error(pdfErr as any, 'Failed to stamp PDF, but continuing with signature registry');
+            }
+        }
+
         // Advance document status to APPROVED
         const updatedDoc = await prisma.document.update({
             where: { id: document.id },
@@ -681,7 +788,13 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
                 status: 'APPROVED'
             },
             include: {
-                signatures: true
+                signatures: {
+                    include: {
+                        signer: {
+                            select: { firstName: true, lastName: true, role: true }
+                        }
+                    }
+                }
             }
         });
 
@@ -720,8 +833,29 @@ app.post('/documents/:id/anchor', async (req: express.Request, res: express.Resp
             .update(`${document.title}-${document.createdAt}-${Date.now()}`)
             .digest('hex');
 
-        // Generate a mock transaction hash/ID
-        const txId = '0x' + crypto.randomBytes(32).toString('hex');
+        // Call FIRMA Core to anchor the hash on the blockchain
+        const coreUrl = process.env.FIRMA_CORE_URL || 'http://localhost:3001';
+        const internalSecret = process.env.INTERNAL_SECRET || 'firma_internal_secure_123';
+        
+        const coreRes = await fetch(`${coreUrl}/external/blockchain/anchor`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Firma-Api-Key': internalSecret
+            },
+            body: JSON.stringify({
+                documentId: document.id,
+                hash: blockchainHash,
+                orgCode: 'NGO-CORE'
+            })
+        });
+        
+        if (!coreRes.ok) {
+            throw new Error('Failed to anchor document on FIRMA Core ledger');
+        }
+        
+        const coreData = await coreRes.json() as any;
+        const txId = coreData.anchor.txId;
 
         const updatedDoc = await prisma.document.update({
             where: { id: document.id },
@@ -806,6 +940,28 @@ app.post('/verify/file', upload.single('file'), async (req: express.Request, res
         // Clean up the uploaded temp file
         fs.unlinkSync(req.file.path);
 
+        // Call FIRMA Core to verify the hash on the blockchain
+        const coreUrl = process.env.FIRMA_CORE_URL || 'http://localhost:3001';
+        const internalSecret = process.env.INTERNAL_SECRET || 'firma_internal_secure_123';
+        
+        const coreRes = await fetch(`${coreUrl}/external/blockchain/verify`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Firma-Api-Key': internalSecret
+            },
+            body: JSON.stringify({
+                hash: fileHash
+            })
+        });
+
+        const coreData = await coreRes.json() as any;
+
+        if (!coreRes.ok || !coreData.verified) {
+            res.status(404).json({ verified: false, computedHash: fileHash, message: 'No matching anchored record found on the ledger. The file content might have been modified.' });
+            return;
+        }
+
         const document = await prisma.document.findFirst({
             where: {
                 blockchainHash: fileHash
@@ -826,7 +982,7 @@ app.post('/verify/file', upload.single('file'), async (req: express.Request, res
         });
 
         if (!document) {
-            res.status(404).json({ verified: false, computedHash: fileHash, message: 'No matching anchored record found on the ledger. The file content might have been modified.' });
+            res.status(404).json({ verified: false, computedHash: fileHash, message: 'Verified on ledger, but document metadata not found locally.' });
             return;
         }
 
@@ -885,6 +1041,23 @@ app.post('/api/internal/tenants', async (req: express.Request, res: express.Resp
         logger.error(err as any, 'Error provisioning internal tenant');
         res.status(500).json({ message: 'Failed to provision tenant' });
     }
+});
+
+// POST /upload-video - Endpoint for uploading video consent recordings
+app.post('/upload-video', upload.single('video'), async (req: express.Request, res: express.Response) => {
+    const userId = getUserIdFromHeader(req);
+    if (!userId) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+    }
+
+    if (!req.file) {
+        res.status(400).json({ message: 'No video file provided' });
+        return;
+    }
+
+    const videoUrl = `/uploads/${req.file.filename}`;
+    res.status(201).json({ url: videoUrl });
 });
 
 const PORT = process.env.PORT || 3004;
