@@ -30,6 +30,7 @@
     "pdf-lib": "^1.17.1",
     "pino": "^9.1.0",
     "pino-pretty": "^11.0.0",
+    "qrcode": "^1.5.4",
     "ws": "^8.17.0",
     "zod": "^3.23.8"
   },
@@ -42,6 +43,7 @@
     "@types/morgan": "^1.9.9",
     "@types/multer": "^1.4.11",
     "@types/node": "^20.12.12",
+    "@types/qrcode": "^1.5.6",
     "prisma": "^5.14.0",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.5"

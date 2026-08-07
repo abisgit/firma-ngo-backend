@@ -7,6 +7,8 @@ import pino from 'pino';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { PDFDocument } from 'pdf-lib';
+import QRCode from 'qrcode';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
@@ -925,12 +927,53 @@ app.post('/documents/:id/anchor', async (req: express.Request, res: express.Resp
         const coreData = await coreRes.json() as any;
         const txId = coreData.anchor.txId;
 
+        // Stamp QR code onto the PDF if it's stored as Base64
+        let newFileUrl = document.fileUrl;
+        if (newFileUrl.startsWith('data:application/pdf;base64,')) {
+            try {
+                // Generate QR Code image as a base64 PNG
+                const verifyUrl = process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/verify?hash=${blockchainHash}` : `https://firma-ngo-frontend.vercel.app/verify?hash=${blockchainHash}`;
+                const qrCodeDataUrl = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 150 });
+                const qrImageBase64 = qrCodeDataUrl.split(',')[1];
+
+                // Load existing PDF
+                const pdfBase64 = newFileUrl.split(',')[1];
+                const pdfBytes = Buffer.from(pdfBase64, 'base64');
+                const pdfDoc = await PDFDocument.load(pdfBytes);
+
+                // Embed the QR Code
+                const qrImageBytes = Buffer.from(qrImageBase64, 'base64');
+                const qrImage = await pdfDoc.embedPng(qrImageBytes);
+                const qrDims = qrImage.scale(0.8);
+
+                // Draw it on the first page (bottom left)
+                const pages = pdfDoc.getPages();
+                if (pages.length > 0) {
+                    const firstPage = pages[0];
+                    firstPage.drawImage(qrImage, {
+                        x: 50,
+                        y: 50,
+                        width: qrDims.width,
+                        height: qrDims.height,
+                    });
+                }
+
+                // Save back to Base64
+                const modifiedPdfBytes = await pdfDoc.save();
+                const modifiedBase64 = Buffer.from(modifiedPdfBytes).toString('base64');
+                newFileUrl = `data:application/pdf;base64,${modifiedBase64}`;
+            } catch (qrError) {
+                logger.error(qrError as any, 'Failed to stamp QR code on PDF:');
+            }
+        }
+
         const updatedDoc = await prisma.document.update({
             where: { id: document.id },
             data: {
                 status: 'ANCHORED',
                 blockchainHash,
-                txId
+                txId,
+                fileUrl: newFileUrl
             }
         });
 
