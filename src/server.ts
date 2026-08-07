@@ -7,7 +7,6 @@ import pino from 'pino';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { PDFDocument } from 'pdf-lib';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
 import path from 'path';
