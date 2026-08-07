@@ -110,9 +110,25 @@ model Signature {
   document        Document @relation(fields: [documentId], references: [id])
   signerId        String
   signer          User     @relation(fields: [signerId], references: [id])
-  videoUrl        String?  // Video evidence of consent (Biometric)
-  signatureHash   String   // Hash of the signed intent
-  signedAt        DateTime @default(now())
-  ipAddress       String?
-  userAgent       String?
+  videoUrl            String?  // Video evidence of consent (Biometric)
+  idType              IdType?  // Type of ID provided during video-consent
+  nationalIdFrontUrl  String?  // Front page of the National ID/Passport
+  nationalIdBackUrl   String?  // Back page of the National ID/Passport
+  verificationStatus  SignatureVerificationStatus @default(VERIFIED) // Verified by default unless video-consent is used
+  signatureHash       String   // Hash of the signed intent
+  signedAt            DateTime @default(now())
+  ipAddress           String?
+  userAgent           String?
+}
+
+enum IdType {
+  PASSPORT
+  DRIVING_LICENSE
+  NATIONAL_ID
+}
+
+enum SignatureVerificationStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
 }

@@ -751,7 +751,7 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
         return;
     }
 
-    const { videoUrl, signatureImage, stampType } = req.body;
+    const { videoUrl, signatureImage, stampType, idType, nationalIdFrontUrl, nationalIdBackUrl } = req.body;
 
     try {
         const document = await prisma.document.findUnique({
@@ -790,16 +790,31 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
         const signatureHash = coreData.signatureHash;
 
         // Create signature record
+        const isVideoConsent = !!videoUrl;
+        const verificationStatus = isVideoConsent ? 'PENDING_VERIFICATION' : 'VERIFIED';
+
         await prisma.signature.create({
             data: {
                 documentId: document.id,
                 signerId: userId,
                 videoUrl: videoUrl || null,
+                idType: idType || null,
+                nationalIdFrontUrl: nationalIdFrontUrl || null,
+                nationalIdBackUrl: nationalIdBackUrl || null,
+                verificationStatus: verificationStatus,
                 signatureHash,
                 ipAddress: req.ip || '127.0.0.1',
                 userAgent: req.headers['user-agent'] || 'Unknown Browser'
             }
         });
+
+        // Update document status if it's pending ID verification
+        if (isVideoConsent) {
+            await prisma.document.update({
+                where: { id: document.id },
+                data: { status: 'PENDING_SIGNATURES' } // Still pending signatures because this one is pending verification
+            });
+        }
 
         // -------------------------------------------------------------
         // Modify the PDF file to include the Digital Signature Certificate
@@ -850,11 +865,11 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             }
         }
 
-        // Advance document status to APPROVED
+        // Advance document status to APPROVED only if all signatures are verified
         const updatedDoc = await prisma.document.update({
             where: { id: document.id },
             data: {
-                status: 'APPROVED'
+                status: isVideoConsent ? 'PENDING_SIGNATURES' : 'APPROVED'
             },
             include: {
                 signatures: {
@@ -1179,6 +1194,91 @@ app.post('/upload-video', upload.single('video'), async (req: express.Request, r
     const videoUrl = `/uploads/${req.file.filename}`;
     res.status(201).json({ url: videoUrl });
 });
+
+// ==========================================
+// FIRMA Admin Endpoints for Identity Verification
+// ==========================================
+
+// GET /admin/signatures/pending
+app.get('/admin/signatures/pending', async (req: express.Request, res: express.Response) => {
+    try {
+        const pendingSignatures = await prisma.signature.findMany({
+            where: {
+                verificationStatus: 'PENDING_VERIFICATION'
+            },
+            include: {
+                signer: {
+                    select: { firstName: true, lastName: true, email: true, profileImageUrl: true }
+                },
+                document: {
+                    select: { title: true, id: true }
+                }
+            }
+        });
+        res.json(pendingSignatures);
+    } catch (err: any) {
+        logger.error(err as any, 'Error fetching pending signatures');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// POST /admin/signatures/:id/verify
+app.post('/admin/signatures/:id/verify', async (req: express.Request, res: express.Response) => {
+    const { signatureId } = req.params;
+    const { action } = req.body; // 'APPROVE' or 'REJECT'
+
+    try {
+        const signature = await prisma.signature.findUnique({
+            where: { id: req.params.id },
+            include: { document: true }
+        });
+
+        if (!signature) {
+            res.status(404).json({ message: 'Signature not found' });
+            return;
+        }
+
+        if (action === 'APPROVE') {
+            await prisma.signature.update({
+                where: { id: signature.id },
+                data: { verificationStatus: 'VERIFIED' }
+            });
+
+            // Check if there are any other pending signatures for this document
+            const pendingCount = await prisma.signature.count({
+                where: {
+                    documentId: signature.documentId,
+                    verificationStatus: 'PENDING_VERIFICATION'
+                }
+            });
+
+            if (pendingCount === 0) {
+                // All signatures verified, mark document as APPROVED
+                await prisma.document.update({
+                    where: { id: signature.documentId },
+                    data: { status: 'APPROVED' }
+                });
+            }
+        } else if (action === 'REJECT') {
+            await prisma.signature.update({
+                where: { id: signature.id },
+                data: { verificationStatus: 'REJECTED' }
+            });
+            // Keep document status as pending or mark as rejected?
+            // Usually if one rejects, the document is rejected.
+            await prisma.document.update({
+                where: { id: signature.documentId },
+                data: { status: 'REJECTED' }
+            });
+        }
+
+        res.json({ success: true, message: `Signature ${action.toLowerCase()}d` });
+    } catch (err: any) {
+        logger.error(err as any, 'Error verifying signature');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
 
 const PORT = process.env.PORT || 3004;
 
