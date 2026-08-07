@@ -931,8 +931,8 @@ app.post('/documents/:id/anchor', async (req: express.Request, res: express.Resp
         if (newFileUrl.startsWith('data:application/pdf;base64,')) {
             try {
                 // Generate QR Code image as a base64 PNG
-                // Reverting to NGO Frontend since firmasafe.com doesn't have the portal yet
-                const verifyUrl = process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/verify?hash=${blockchainHash}` : `https://firma-ngo-frontend.vercel.app/verify?hash=${blockchainHash}`;
+                // Pointing to FIRMA Core (firmasafe.com) as requested
+                const verifyUrl = `https://firmasafe.com/verify?hash=${blockchainHash}`;
                 const qrCodeDataUrl = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 100 });
                 const qrImageBase64 = qrCodeDataUrl.split(',')[1];
 
