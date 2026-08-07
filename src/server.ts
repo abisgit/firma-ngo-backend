@@ -932,7 +932,7 @@ app.post('/documents/:id/anchor', async (req: express.Request, res: express.Resp
             try {
                 // Generate QR Code image as a base64 PNG
                 const verifyUrl = process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/verify?hash=${blockchainHash}` : `https://firma-ngo-frontend.vercel.app/verify?hash=${blockchainHash}`;
-                const qrCodeDataUrl = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 150 });
+                const qrCodeDataUrl = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 100 });
                 const qrImageBase64 = qrCodeDataUrl.split(',')[1];
 
                 // Load existing PDF
@@ -945,13 +945,14 @@ app.post('/documents/:id/anchor', async (req: express.Request, res: express.Resp
                 const qrImage = await pdfDoc.embedPng(qrImageBytes);
                 const qrDims = qrImage.scale(0.8);
 
-                // Draw it on the first page (bottom left)
+                // Draw it on the first page (bottom right)
                 const pages = pdfDoc.getPages();
                 if (pages.length > 0) {
                     const firstPage = pages[0];
+                    const pageWidth = firstPage.getWidth();
                     firstPage.drawImage(qrImage, {
-                        x: 50,
-                        y: 50,
+                        x: pageWidth - qrDims.width - 40,
+                        y: 40,
                         width: qrDims.width,
                         height: qrDims.height,
                     });
