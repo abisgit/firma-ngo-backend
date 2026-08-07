@@ -73,7 +73,7 @@ async function seedDatabase() {
     try {
         // Ensure default organization exists
         let defaultOrg = await prisma.organization.findFirst({
-            where: { name: 'Hope International Ethiopia' }
+            where: { registrationCode: 'NGO-ETH-2026-001' }
         });
         if (!defaultOrg) {
             defaultOrg = await prisma.organization.create({
@@ -231,7 +231,23 @@ app.post('/api/seed', async (req, res) => {
 
 // Health Check
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', service: 'firma-ngo-backend' });
+    res.json({ status: 'OK' });
+});
+
+// FIRMA Core Connection Check
+app.get('/firma/connection-status', async (req, res) => {
+    try {
+        const coreUrl = process.env.FIRMA_CORE_URL || 'https://api.firmasafe.com';
+        // Just try to fetch the root or a health endpoint to see if it responds
+        const response = await fetch(`${coreUrl}/api/health`).catch(() => null);
+        if (response) {
+            res.json({ connected: true });
+        } else {
+            res.json({ connected: false });
+        }
+    } catch (error) {
+        res.json({ connected: false });
+    }
 });
 
 // Authentication Routes
@@ -430,8 +446,8 @@ app.get('/organization/profile', async (req: express.Request, res: express.Respo
             where: { id: userId },
             include: { organization: true }
         });
-        if (!user || user.role !== 'SUPER_ADMIN') {
-            res.status(403).json({ message: 'Forbidden' });
+        if (!user || !user.organization) {
+            res.status(404).json({ message: 'Organization not found' });
             return;
         }
         res.json(user.organization);
@@ -439,6 +455,57 @@ app.get('/organization/profile', async (req: express.Request, res: express.Respo
         logger.error(error as any, 'Get organization error');
         res.status(500).json({ message: 'Internal server error' });
     }
+});
+
+// PUT /organization/profile - Update organization profile
+app.put('/organization/profile', async (req: express.Request, res: express.Response) => {
+    const userId = getUserIdFromHeader(req);
+    if (!userId) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+    }
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            include: { organization: true }
+        });
+        if (!user || user.role !== 'SUPER_ADMIN' || !user.organizationId) {
+            res.status(403).json({ message: 'Forbidden' });
+            return;
+        }
+
+        const { name, themeLogoUrl, primaryColor, secondaryColor } = req.body;
+        const updatedOrg = await prisma.organization.update({
+            where: { id: user.organizationId },
+            data: {
+                name: name !== undefined ? name : user.organization?.name,
+                themeLogoUrl: themeLogoUrl !== undefined ? themeLogoUrl : user.organization?.themeLogoUrl,
+                primaryColor: primaryColor !== undefined ? primaryColor : user.organization?.primaryColor,
+                secondaryColor: secondaryColor !== undefined ? secondaryColor : user.organization?.secondaryColor,
+            }
+        });
+        res.json(updatedOrg);
+    } catch (error) {
+        logger.error(error as any, 'Update organization error');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// POST /upload-logo - Endpoint for uploading organization logo
+app.post('/upload-logo', upload.single('logo'), async (req: express.Request, res: express.Response) => {
+    const userId = getUserIdFromHeader(req);
+    if (!userId) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+    }
+
+    if (!req.file) {
+        res.status(400).json({ message: 'No logo file provided' });
+        return;
+    }
+
+    const logoUrl = `/uploads/${req.file.filename}`;
+    res.status(201).json({ url: logoUrl });
 });
 
 // GET /projects - Get NGO projects
@@ -695,7 +762,7 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
         }
 
         // Call FIRMA Core to register the signature securely
-        const coreUrl = process.env.FIRMA_CORE_URL || 'http://localhost:3001';
+        const coreUrl = process.env.FIRMA_CORE_URL || 'https://api.firmasafe.com';
         const internalSecret = process.env.INTERNAL_SECRET || 'firma_internal_secure_123';
         
         const coreRes = await fetch(`${coreUrl}/external/signatures/sign`, {
@@ -834,7 +901,7 @@ app.post('/documents/:id/anchor', async (req: express.Request, res: express.Resp
             .digest('hex');
 
         // Call FIRMA Core to anchor the hash on the blockchain
-        const coreUrl = process.env.FIRMA_CORE_URL || 'http://localhost:3001';
+        const coreUrl = process.env.FIRMA_CORE_URL || 'https://api.firmasafe.com';
         const internalSecret = process.env.INTERNAL_SECRET || 'firma_internal_secure_123';
         
         const coreRes = await fetch(`${coreUrl}/external/blockchain/anchor`, {
@@ -941,7 +1008,7 @@ app.post('/verify/file', upload.single('file'), async (req: express.Request, res
         fs.unlinkSync(req.file.path);
 
         // Call FIRMA Core to verify the hash on the blockchain
-        const coreUrl = process.env.FIRMA_CORE_URL || 'http://localhost:3001';
+        const coreUrl = process.env.FIRMA_CORE_URL || 'https://api.firmasafe.com';
         const internalSecret = process.env.INTERNAL_SECRET || 'firma_internal_secure_123';
         
         const coreRes = await fetch(`${coreUrl}/external/blockchain/verify`, {

@@ -43,6 +43,9 @@ model Organization {
   name            String
   registrationCode String   @unique
   country         String
+  themeLogoUrl    String?
+  primaryColor    String?
+  secondaryColor  String?
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
