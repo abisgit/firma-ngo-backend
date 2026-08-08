@@ -438,7 +438,8 @@ app.post('/proxy-identity-verify', upload.fields([{ name: 'idFront', maxCount: 1
         if (coreRes.ok) {
             res.json({ message: 'Identity verified successfully', isIdentityVerified: true });
         } else {
-            res.status(coreRes.status).json({ message: 'Failed to verify identity with FIRMA Core' });
+            const errorText = await coreRes.text().catch(() => 'No response body');
+            res.status(coreRes.status).json({ message: `Failed to verify identity with FIRMA Core (Status ${coreRes.status}). URL: ${coreUrl}/external/identity/verify. Email: ${authUser.email}. Response: ${errorText}` });
         }
     } catch (error) {
         logger.error(error as any, 'Verify identity error');
