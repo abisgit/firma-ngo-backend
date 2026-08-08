@@ -940,8 +940,9 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
         }
 
         // Keep document in PENDING_SIGNATURES until admin approves it
-        const updatedDoc = await prisma.document.findUnique({
+        const updatedDoc = await prisma.document.update({
             where: { id: document.id },
+            data: { status: 'PENDING_SIGNATURES' },
             include: {
                 signatures: {
                     include: {
@@ -1272,23 +1273,28 @@ app.post('/upload-video', upload.single('video'), async (req: express.Request, r
 // FIRMA Admin Endpoints for Identity Verification
 // ==========================================
 
-// GET /admin/signatures/pending
-app.get('/admin/signatures/pending', async (req: express.Request, res: express.Response) => {
+// GET /admin/signatures
+app.get('/admin/signatures', async (req: express.Request, res: express.Response) => {
     try {
-        const pendingSignatures = await prisma.signature.findMany({
-            where: {
-                verificationStatus: 'PENDING_VERIFICATION'
-            },
+        const signatures = await prisma.signature.findMany({
             include: {
                 signer: {
-                    select: { firstName: true, lastName: true, email: true, profileImageUrl: true }
+                    select: { 
+                        firstName: true, 
+                        lastName: true, 
+                        email: true, 
+                        profileImageUrl: true,
+                        organization: {
+                            select: { name: true }
+                        }
+                    }
                 },
                 document: {
                     select: { title: true, id: true }
                 }
             }
         });
-        res.json(pendingSignatures);
+        res.json(signatures);
     } catch (err: any) {
         logger.error(err as any, 'Error fetching pending signatures');
         res.status(500).json({ message: 'Internal server error' });
