@@ -880,13 +880,7 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             }
         });
 
-        // Update document status if it's pending ID verification
-        if (isVideoConsent) {
-            await prisma.document.update({
-                where: { id: document.id },
-                data: { status: 'PENDING_SIGNATURES' } // Still pending signatures because this one is pending verification
-            });
-        }
+        // Identity verification is handled via FIRMA Core; no pending state needed here.
 
         // -------------------------------------------------------------
         // Modify the PDF file to include the Digital Signature Certificate
