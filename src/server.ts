@@ -872,7 +872,7 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
                 documentId: document.id,
                 signerId: authUser.id,
                 videoUrl: videoUrl || null,
-                verificationStatus: 'VERIFIED',
+                verificationStatus: 'PENDING_VERIFICATION',
                 signatureHash,
                 ipAddress: req.ip || '127.0.0.1',
                 userAgent: req.headers['user-agent'] || 'Unknown Browser'
@@ -928,12 +928,9 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             }
         }
 
-        // Advance document status to APPROVED since signatures are pre-verified
-        const updatedDoc = await prisma.document.update({
+        // Keep document in PENDING_SIGNATURES until admin approves it
+        const updatedDoc = await prisma.document.findUnique({
             where: { id: document.id },
-            data: {
-                status: 'APPROVED'
-            },
             include: {
                 signatures: {
                     include: {
