@@ -1243,8 +1243,8 @@ app.post('/api/internal/tenants', async (req: express.Request, res: express.Resp
 
 // POST /upload-video - Endpoint for uploading video consent recordings
 app.post('/upload-video', upload.single('video'), async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
