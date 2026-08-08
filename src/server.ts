@@ -1222,6 +1222,33 @@ app.get('/admin/signatures/pending', async (req: express.Request, res: express.R
     }
 });
 
+// GET /admin/signatures/:id
+app.get('/admin/signatures/:id', async (req: express.Request, res: express.Response) => {
+    try {
+        const signature = await prisma.signature.findUnique({
+            where: { id: req.params.id },
+            include: {
+                signer: {
+                    select: { firstName: true, lastName: true, email: true, profileImageUrl: true }
+                },
+                document: {
+                    select: { title: true, id: true }
+                }
+            }
+        });
+
+        if (!signature) {
+            res.status(404).json({ message: 'Signature not found' });
+            return;
+        }
+
+        res.json(signature);
+    } catch (err: any) {
+        logger.error(err as any, 'Error fetching signature details');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
 // POST /admin/signatures/:id/verify
 app.post('/admin/signatures/:id/verify', async (req: express.Request, res: express.Response) => {
     const { signatureId } = req.params;
