@@ -49,14 +49,13 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 // Helper to authenticate request and get User ID
-const getUserIdFromHeader = (req: express.Request) => {
+const getUserFromHeader = (req: express.Request): { id: string, email: string } | null => {
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-    const token = authHeader.split(' ')[1];
-    if (!token) return null;
+    if (!authHeader) return null;
     try {
+        const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, JWT_SECRET) as any;
-        return decoded.id;
+        return { id: decoded.id, email: decoded.email };
     } catch {
         return null;
     }
@@ -349,15 +348,15 @@ app.post('/auth/login', async (req: express.Request, res: express.Response) => {
 
 // Get current user route
 app.get('/auth/me', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
 
     try {
         const user = await prisma.user.findUnique({
-            where: { id: userId },
+            where: { id: authUser.id },
             include: { organization: true }
         });
 
@@ -373,7 +372,7 @@ app.get('/auth/me', async (req: express.Request, res: express.Response) => {
         try {
             const coreUrl = process.env.FIRMA_CORE_URL || 'https://api.firmasafe.com';
             const internalSecret = process.env.INTERNAL_SECRET || 'firma_internal_secure_123';
-            const coreRes = await fetch(`${coreUrl}/external/identity/status/${userId}`, {
+            const coreRes = await fetch(`${coreUrl}/external/identity/status/${encodeURIComponent(authUser.email)}`, {
                 headers: { 'X-Firma-Api-Key': internalSecret }
             });
             if (coreRes.ok) {
@@ -392,8 +391,8 @@ app.get('/auth/me', async (req: express.Request, res: express.Response) => {
 
 // POST /proxy-identity-verify - Proxy identity verification to FIRMA Core
 app.post('/proxy-identity-verify', upload.fields([{ name: 'idFront', maxCount: 1 }, { name: 'idBack', maxCount: 1 }, { name: 'video', maxCount: 1 }]), async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
@@ -428,7 +427,7 @@ app.post('/proxy-identity-verify', upload.fields([{ name: 'idFront', maxCount: 1
                 'X-Firma-Api-Key': internalSecret
             },
             body: JSON.stringify({
-                userId,
+                email: authUser.email,
                 nationalIdFrontUrl,
                 nationalIdBackUrl,
                 videoUrl,
@@ -449,14 +448,14 @@ app.post('/proxy-identity-verify', upload.fields([{ name: 'idFront', maxCount: 1
 
 // GET /api/users - Get all users for the org (System Admin Only)
 app.get('/api/users', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
 
     try {
-        const user = await prisma.user.findUnique({ where: { id: userId } });
+        const user = await prisma.user.findUnique({ where: { id: authUser.id } });
         if (!user || user.role !== 'SUPER_ADMIN') {
             res.status(403).json({ message: 'Forbidden: Requires System Admin role' });
             return;
@@ -481,13 +480,13 @@ app.get('/api/users', async (req: express.Request, res: express.Response) => {
 
 // PUT /api/users/:id/permissions - Update user permissions
 app.put('/api/users/:id/permissions', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
     try {
-        const adminUser = await prisma.user.findUnique({ where: { id: userId } });
+        const adminUser = await prisma.user.findUnique({ where: { id: authUser.id } });
         if (!adminUser || adminUser.role !== 'SUPER_ADMIN') {
             res.status(403).json({ message: 'Forbidden' });
             return;
@@ -504,14 +503,14 @@ app.put('/api/users/:id/permissions', async (req: express.Request, res: express.
 
 // GET /organization/profile - Get organization profile
 app.get('/organization/profile', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
     try {
         const user = await prisma.user.findUnique({
-            where: { id: userId },
+            where: { id: authUser.id },
             include: { organization: true }
         });
         if (!user || !user.organization) {
@@ -527,14 +526,14 @@ app.get('/organization/profile', async (req: express.Request, res: express.Respo
 
 // PUT /organization/profile - Update organization profile
 app.put('/organization/profile', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
     try {
         const user = await prisma.user.findUnique({
-            where: { id: userId },
+            where: { id: authUser.id },
             include: { organization: true }
         });
         if (!user || user.role !== 'SUPER_ADMIN' || !user.organizationId) {
@@ -561,8 +560,8 @@ app.put('/organization/profile', async (req: express.Request, res: express.Respo
 
 // POST /upload-logo - Endpoint for uploading organization logo
 app.post('/upload-logo', upload.single('logo'), async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
@@ -578,15 +577,15 @@ app.post('/upload-logo', upload.single('logo'), async (req: express.Request, res
 
 // GET /projects - Get NGO projects
 app.get('/projects', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
 
     try {
         const user = await prisma.user.findUnique({
-            where: { id: userId }
+            where: { id: authUser.id }
         });
         if (!user || !user.organizationId) {
             res.json([]);
@@ -605,14 +604,14 @@ app.get('/projects', async (req: express.Request, res: express.Response) => {
 
 // POST /projects - Create a new project
 app.post('/projects', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
 
     try {
-        const user = await prisma.user.findUnique({ where: { id: userId } });
+        const user = await prisma.user.findUnique({ where: { id: authUser.id } });
         if (!user || !user.organizationId) {
             res.status(403).json({ message: 'User does not belong to an organization' });
             return;
@@ -652,15 +651,14 @@ app.post('/projects', async (req: express.Request, res: express.Response) => {
 
 // GET /projects/:id - Get a single project
 app.get('/projects/:id', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
 
     try {
-        // MOCK USER TO BYPASS NEON DB NETWORK ISSUES
-        const user = { id: userId, organizationId: 'mock-org-123' };
+        const user = await prisma.user.findUnique({ where: { id: authUser.id } });
         if (!user || !user.organizationId) {
             res.status(404).json({ message: 'Project not found' });
             return;
@@ -685,15 +683,15 @@ app.get('/projects/:id', async (req: express.Request, res: express.Response) => 
 
 // GET /documents - Get document list
 app.get('/documents', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
 
     try {
         const user = await prisma.user.findUnique({
-            where: { id: userId }
+            where: { id: authUser.id }
         });
         if (!user || !user.organizationId) {
             res.json([]);
@@ -701,7 +699,7 @@ app.get('/documents', async (req: express.Request, res: express.Response) => {
         }
 
         const documents = await prisma.document.findMany({
-            where: { creatorId: userId },
+            where: { creatorId: authUser.id },
             include: {
                 project: true,
                 creator: true,
@@ -723,8 +721,8 @@ app.get('/documents', async (req: express.Request, res: express.Response) => {
 
 // GET /documents/:id - Get single document detail
 app.get('/documents/:id', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
@@ -772,8 +770,8 @@ app.post('/upload', upload.single('file'), (req: express.Request, res: express.R
 
 // POST /documents - Create a new document draft
 app.post('/documents', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
@@ -789,7 +787,7 @@ app.post('/documents', async (req: express.Request, res: express.Response) => {
         const document = await prisma.document.create({
             data: {
                 projectId: projectId || null,
-                creatorId: userId,
+                creatorId: authUser.id,
                 title,
                 documentType,
                 fileUrl: fileUrl || '/uploads/sample.pdf',
@@ -809,17 +807,17 @@ app.post('/documents', async (req: express.Request, res: express.Response) => {
     }
 });
 
-// POST /documents/:id/sign - Sign a document (includes mock biometric/video consent)
+// POST /documents/:id/sign - Sign Document (Requires Identity Verified via Core)
 app.post('/documents/:id/sign', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
-    if (!userId) {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
     }
 
-    const { videoUrl, signatureImage, stampType, idType, nationalIdFrontUrl, nationalIdBackUrl } = req.body;
-
     try {
+        const { signatureImage, videoUrl, stampType } = req.body;
+        
         const document = await prisma.document.findUnique({
             where: { id: req.params.id }
         });
@@ -828,6 +826,11 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             res.status(404).json({ message: 'Document not found' });
             return;
         }
+
+        const user = await prisma.user.findUnique({
+            where: { id: authUser.id },
+            include: { organization: true }
+        });
 
         // Call FIRMA Core to register the signature securely
         const coreUrl = process.env.FIRMA_CORE_URL || 'https://api.firmasafe.com';
@@ -842,7 +845,7 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
                 },
                 body: JSON.stringify({
                     documentId: document.id,
-                    signerId: userId,
+                    signerEmail: authUser.email,
                     videoUrl: videoUrl ? (videoUrl.startsWith('data:') ? 'BASE64_DATA' : videoUrl) : null,
                     ipAddress: req.ip || '127.0.0.1',
                     userAgent: req.headers['user-agent'] || 'Unknown Browser'
@@ -862,25 +865,18 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             logger.warn('FIRMA Core unreachable, falling back to local hash');
         }
 
-        // Create signature record (Identity is pre-verified on FIRMA Core)
-        const verificationStatus = 'VERIFIED';
-
+        // Create signature record
         await prisma.signature.create({
             data: {
                 documentId: document.id,
-                signerId: userId,
+                signerId: authUser.id,
                 videoUrl: videoUrl || null,
-                idType: idType || null,
-                nationalIdFrontUrl: nationalIdFrontUrl || null,
-                nationalIdBackUrl: nationalIdBackUrl || null,
-                verificationStatus: verificationStatus,
+                verificationStatus: 'VERIFIED',
                 signatureHash,
                 ipAddress: req.ip || '127.0.0.1',
                 userAgent: req.headers['user-agent'] || 'Unknown Browser'
             }
         });
-
-        // Identity verification is handled via FIRMA Core; no pending state needed here.
 
         // -------------------------------------------------------------
         // Modify the PDF file to include the Digital Signature Certificate
@@ -899,7 +895,7 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
                 // Draw Certificate Header
                 page.drawText('FIRMA Digital Signature Certificate', { x: 50, y: height - 50, size: 24, font: boldFont, color: rgb(0.1, 0.3, 0.5) });
                 page.drawText(`Document ID: ${document.id}`, { x: 50, y: height - 80, size: 12, font });
-                page.drawText(`Signer ID: ${userId}`, { x: 50, y: height - 100, size: 12, font });
+                page.drawText(`Signer ID: ${authUser.id}`, { x: 50, y: height - 100, size: 12, font });
                 page.drawText(`Signature Hash: ${signatureHash}`, { x: 50, y: height - 120, size: 10, font, color: rgb(0.4, 0.4, 0.4) });
                 page.drawText(`Date: ${new Date().toISOString()}`, { x: 50, y: height - 140, size: 12, font });
 
@@ -957,7 +953,7 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
 
 // POST /documents/:id/anchor - Anchor approved document onto the blockchain
 app.post('/documents/:id/anchor', async (req: express.Request, res: express.Response) => {
-    const userId = getUserIdFromHeader(req);
+    const userId = getUserFromHeader(req);
     if (!userId) {
         res.status(401).json({ message: 'Unauthorized' });
         return;
