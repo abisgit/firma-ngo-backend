@@ -390,8 +390,8 @@ app.get('/auth/me', async (req: express.Request, res: express.Response) => {
     }
 });
 
-// POST /api/identity/verify - Proxy identity verification to FIRMA Core
-app.post('/api/identity/verify', upload.fields([{ name: 'idFront', maxCount: 1 }, { name: 'idBack', maxCount: 1 }, { name: 'video', maxCount: 1 }]), async (req: express.Request, res: express.Response) => {
+// POST /proxy-identity-verify - Proxy identity verification to FIRMA Core
+app.post('/proxy-identity-verify', upload.fields([{ name: 'idFront', maxCount: 1 }, { name: 'idBack', maxCount: 1 }, { name: 'video', maxCount: 1 }]), async (req: express.Request, res: express.Response) => {
     const userId = getUserIdFromHeader(req);
     if (!userId) {
         res.status(401).json({ message: 'Unauthorized' });
