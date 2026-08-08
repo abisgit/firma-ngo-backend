@@ -45,15 +45,7 @@ if (!fs.existsSync(uploadsDir)) {
 app.use('/uploads', express.static(uploadsDir));
 
 // Multer storage config
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, uploadsDir);
-    },
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-        cb(null, uniqueSuffix + '-' + file.originalname);
-    }
-});
+const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 // Helper to authenticate request and get User ID
@@ -1191,7 +1183,9 @@ app.post('/upload-video', upload.single('video'), async (req: express.Request, r
         return;
     }
 
-    const videoUrl = `/uploads/${req.file.filename}`;
+    const base64Data = req.file.buffer.toString('base64');
+    const mimeType = req.file.mimetype || 'application/octet-stream';
+    const videoUrl = `data:${mimeType};base64,${base64Data}`;
     res.status(201).json({ url: videoUrl });
 });
 
