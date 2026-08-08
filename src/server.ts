@@ -436,7 +436,15 @@ app.post('/proxy-identity-verify', upload.fields([{ name: 'idFront', maxCount: 1
         });
 
         if (coreRes.ok) {
-            res.json({ message: 'Identity verified successfully', isIdentityVerified: true });
+            const coreData = await coreRes.json() as any;
+            res.json({ 
+                message: 'Identity verified successfully', 
+                isIdentityVerified: true,
+                videoUrl,
+                nationalIdFrontUrl: nationalIdFrontUrl || coreData.nationalIdFrontUrl,
+                nationalIdBackUrl: nationalIdBackUrl || coreData.nationalIdBackUrl,
+                idType: idType || coreData.idType
+            });
         } else {
             const errorText = await coreRes.text().catch(() => 'No response body');
             res.status(coreRes.status).json({ message: `Failed to verify identity with FIRMA Core (Status ${coreRes.status}). URL: ${coreUrl}/external/identity/verify. Email: ${authUser.email}. Response: ${errorText}` });
@@ -817,7 +825,7 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
     }
 
     try {
-        const { signatureImage, videoUrl, stampType } = req.body;
+        const { signatureImage, videoUrl, stampType, nationalIdFrontUrl, nationalIdBackUrl, idType } = req.body;
         
         const document = await prisma.document.findUnique({
             where: { id: req.params.id }
@@ -872,6 +880,9 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
                 documentId: document.id,
                 signerId: authUser.id,
                 videoUrl: videoUrl || null,
+                idType: idType || null,
+                nationalIdFrontUrl: nationalIdFrontUrl || null,
+                nationalIdBackUrl: nationalIdBackUrl || null,
                 verificationStatus: 'PENDING_VERIFICATION',
                 signatureHash,
                 ipAddress: req.ip || '127.0.0.1',
