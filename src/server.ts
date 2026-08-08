@@ -367,9 +367,83 @@ app.get('/auth/me', async (req: express.Request, res: express.Response) => {
         }
 
         const { password: _, ...userWithoutPassword } = user;
-        res.json(userWithoutPassword);
+        
+        // Fetch identity verification status from FIRMA Core
+        let isIdentityVerified = false;
+        try {
+            const coreUrl = process.env.FIRMA_CORE_URL || 'https://api.firmasafe.com';
+            const internalSecret = process.env.INTERNAL_SECRET || 'firma_internal_secure_123';
+            const coreRes = await fetch(`${coreUrl}/external/identity/status/${userId}`, {
+                headers: { 'X-Firma-Api-Key': internalSecret }
+            });
+            if (coreRes.ok) {
+                const coreData = await coreRes.json() as any;
+                isIdentityVerified = !!coreData.isIdentityVerified;
+            }
+        } catch (e) {
+            logger.warn('Failed to fetch identity status from FIRMA Core');
+        }
+
+        res.json({ ...userWithoutPassword, isIdentityVerified });
     } catch (error) {
         res.status(501).json({ message: 'Error retrieving user session' });
+    }
+});
+
+// POST /api/identity/verify - Proxy identity verification to FIRMA Core
+app.post('/api/identity/verify', upload.fields([{ name: 'idFront', maxCount: 1 }, { name: 'idBack', maxCount: 1 }, { name: 'video', maxCount: 1 }]), async (req: express.Request, res: express.Response) => {
+    const userId = getUserIdFromHeader(req);
+    if (!userId) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+    }
+    
+    try {
+        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+        let nationalIdFrontUrl = null;
+        let nationalIdBackUrl = null;
+        let videoUrl = null;
+        const idType = req.body.idType || 'NATIONAL_ID';
+
+        if (files?.idFront && files.idFront[0]) {
+            const f = files.idFront[0];
+            nationalIdFrontUrl = `data:${f.mimetype || 'image/jpeg'};base64,${f.buffer.toString('base64')}`;
+        }
+        if (files?.idBack && files.idBack[0]) {
+            const f = files.idBack[0];
+            nationalIdBackUrl = `data:${f.mimetype || 'image/jpeg'};base64,${f.buffer.toString('base64')}`;
+        }
+        if (files?.video && files.video[0]) {
+            const f = files.video[0];
+            videoUrl = `data:${f.mimetype || 'video/webm'};base64,${f.buffer.toString('base64')}`;
+        }
+
+        const coreUrl = process.env.FIRMA_CORE_URL || 'https://api.firmasafe.com';
+        const internalSecret = process.env.INTERNAL_SECRET || 'firma_internal_secure_123';
+        
+        const coreRes = await fetch(`${coreUrl}/external/identity/verify`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Firma-Api-Key': internalSecret
+            },
+            body: JSON.stringify({
+                userId,
+                nationalIdFrontUrl,
+                nationalIdBackUrl,
+                videoUrl,
+                idType
+            })
+        });
+
+        if (coreRes.ok) {
+            res.json({ message: 'Identity verified successfully', isIdentityVerified: true });
+        } else {
+            res.status(coreRes.status).json({ message: 'Failed to verify identity with FIRMA Core' });
+        }
+    } catch (error) {
+        logger.error(error as any, 'Verify identity error');
+        res.status(500).json({ message: 'Internal server error' });
     }
 });
 
@@ -778,6 +852,9 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             if (coreRes.ok) {
                 const coreData = await coreRes.json() as any;
                 if (coreData.signatureHash) signatureHash = coreData.signatureHash;
+            } else if (coreRes.status === 403) {
+                res.status(403).json({ message: 'User identity is not verified on FIRMA Core' });
+                return;
             } else {
                 logger.warn('FIRMA Core returned an error, falling back to local hash');
             }
@@ -785,9 +862,8 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             logger.warn('FIRMA Core unreachable, falling back to local hash');
         }
 
-        // Create signature record
-        const isVideoConsent = !!videoUrl;
-        const verificationStatus = isVideoConsent ? 'PENDING_VERIFICATION' : 'VERIFIED';
+        // Create signature record (Identity is pre-verified on FIRMA Core)
+        const verificationStatus = 'VERIFIED';
 
         await prisma.signature.create({
             data: {
@@ -861,11 +937,11 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             }
         }
 
-        // Advance document status to APPROVED only if all signatures are verified
+        // Advance document status to APPROVED since signatures are pre-verified
         const updatedDoc = await prisma.document.update({
             where: { id: document.id },
             data: {
-                status: isVideoConsent ? 'PENDING_SIGNATURES' : 'APPROVED'
+                status: 'APPROVED'
             },
             include: {
                 signatures: {
