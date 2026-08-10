@@ -455,6 +455,87 @@ app.post('/proxy-identity-verify', upload.fields([{ name: 'idFront', maxCount: 1
     }
 });
 
+// POST /users/verify - Early Identity Verification
+app.post('/users/verify', upload.fields([{ name: 'idFront', maxCount: 1 }, { name: 'idBack', maxCount: 1 }, { name: 'video', maxCount: 1 }]), async (req: express.Request, res: express.Response) => {
+    const authUser = getUserFromHeader(req);
+    if (!authUser) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+    }
+    
+    try {
+        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+        let nationalIdFrontUrl = null;
+        let nationalIdBackUrl = null;
+        let videoUrl = null;
+        const idType = req.body.idType || 'NATIONAL_ID';
+        const masterSignatureUrl = req.body.masterSignatureUrl || null;
+
+        if (files?.idFront && files.idFront[0]) {
+            const f = files.idFront[0];
+            nationalIdFrontUrl = `data:${f.mimetype || 'image/jpeg'};base64,${f.buffer.toString('base64')}`;
+        }
+        if (files?.idBack && files.idBack[0]) {
+            const f = files.idBack[0];
+            nationalIdBackUrl = `data:${f.mimetype || 'image/jpeg'};base64,${f.buffer.toString('base64')}`;
+        }
+        if (files?.video && files.video[0]) {
+            const f = files.video[0];
+            videoUrl = `data:${f.mimetype || 'video/webm'};base64,${f.buffer.toString('base64')}`;
+        }
+
+        const coreUrl = process.env.FIRMA_CORE_URL || 'https://api.firmasafe.com';
+        const internalSecret = process.env.INTERNAL_SECRET || 'firma_internal_secure_123';
+        
+        let finalNationalIdFrontUrl = nationalIdFrontUrl;
+        let finalNationalIdBackUrl = nationalIdBackUrl;
+        let finalVideoUrl = videoUrl;
+
+        try {
+            const coreRes = await fetch(`${coreUrl}/external/identity/verify`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Firma-Api-Key': internalSecret
+                },
+                body: JSON.stringify({
+                    email: authUser.email,
+                    nationalIdFrontUrl,
+                    nationalIdBackUrl,
+                    videoUrl,
+                    idType
+                })
+            });
+
+            if (coreRes.ok) {
+                const coreData = await coreRes.json() as any;
+                if (coreData.nationalIdFrontUrl) finalNationalIdFrontUrl = coreData.nationalIdFrontUrl;
+                if (coreData.nationalIdBackUrl) finalNationalIdBackUrl = coreData.nationalIdBackUrl;
+            }
+        } catch (e) {
+            logger.warn('FIRMA Core unreachable for early verification, proceeding with local Base64 storage.');
+        }
+
+        // Save to user profile
+        await prisma.user.update({
+            where: { id: authUser.id },
+            data: {
+                isVerified: true,
+                videoUrl: finalVideoUrl,
+                nationalIdFrontUrl: finalNationalIdFrontUrl,
+                nationalIdBackUrl: finalNationalIdBackUrl,
+                idType,
+                masterSignatureUrl
+            }
+        });
+
+        res.json({ message: 'Identity verified successfully' });
+    } catch (error) {
+        logger.error(error as any, 'Early verify identity error');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
 // GET /api/users - Get all users for the org (System Admin Only)
 app.get('/api/users', async (req: express.Request, res: express.Response) => {
     const authUser = getUserFromHeader(req);
@@ -841,6 +922,18 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             include: { organization: true }
         });
 
+        // Use early verified data if available
+        const finalSignatureImage = signatureImage || user?.masterSignatureUrl;
+        const finalVideoUrl = user?.isVerified ? user.videoUrl : videoUrl;
+        const finalNationalIdFrontUrl = user?.isVerified ? user.nationalIdFrontUrl : nationalIdFrontUrl;
+        const finalNationalIdBackUrl = user?.isVerified ? user.nationalIdBackUrl : nationalIdBackUrl;
+        const finalIdType = user?.isVerified ? user.idType : idType;
+
+        if (!finalSignatureImage) {
+            res.status(400).json({ message: 'Signature image is required' });
+            return;
+        }
+
         // Call FIRMA Core to register the signature securely
         const coreUrl = process.env.FIRMA_CORE_URL || 'https://api.firmasafe.com';
         const internalSecret = process.env.INTERNAL_SECRET || 'firma_internal_secure_123';
@@ -855,7 +948,7 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
                 body: JSON.stringify({
                     documentId: document.id,
                     signerEmail: authUser.email,
-                    videoUrl: videoUrl ? (videoUrl.startsWith('data:') ? 'BASE64_DATA' : videoUrl) : null,
+                    videoUrl: finalVideoUrl ? (finalVideoUrl.startsWith('data:') ? 'BASE64_DATA' : finalVideoUrl) : null,
                     ipAddress: req.ip || '127.0.0.1',
                     userAgent: req.headers['user-agent'] || 'Unknown Browser'
                 })
@@ -879,10 +972,10 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             data: {
                 documentId: document.id,
                 signerId: authUser.id,
-                videoUrl: videoUrl || null,
-                idType: idType || null,
-                nationalIdFrontUrl: nationalIdFrontUrl || null,
-                nationalIdBackUrl: nationalIdBackUrl || null,
+                videoUrl: finalVideoUrl || null,
+                idType: finalIdType || null,
+                nationalIdFrontUrl: finalNationalIdFrontUrl || null,
+                nationalIdBackUrl: finalNationalIdBackUrl || null,
                 verificationStatus: 'PENDING_VERIFICATION',
                 signatureHash,
                 ipAddress: req.ip || '127.0.0.1',
@@ -917,8 +1010,8 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
                 }
 
                 // Draw Handwritten Signature
-                if (signatureImage && signatureImage.startsWith('data:image/png;base64,')) {
-                    const base64Data = signatureImage.replace('data:image/png;base64,', '');
+                if (finalSignatureImage && finalSignatureImage.startsWith('data:image/png;base64,')) {
+                    const base64Data = finalSignatureImage.replace('data:image/png;base64,', '');
                     const imageBytes = Buffer.from(base64Data, 'base64');
                     const embeddedImage = await pdfDoc.embedPng(imageBytes);
                     const imgDims = embeddedImage.scale(0.5);

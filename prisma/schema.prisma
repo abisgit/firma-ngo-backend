@@ -26,6 +26,14 @@ model User {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
+  // Early Verification Fields
+  isVerified         Boolean  @default(false)
+  masterSignatureUrl String?
+  videoUrl           String?
+  idType             IdType?
+  nationalIdFrontUrl String?
+  nationalIdBackUrl  String?
+
   documentsCreated Document[]  @relation("DocumentCreator")
   documentsSigned  Signature[]
 }
