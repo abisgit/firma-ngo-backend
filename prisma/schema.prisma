@@ -33,6 +33,7 @@ model User {
   idType             IdType?
   nationalIdFrontUrl String?
   nationalIdBackUrl  String?
+  kycRejectionReason String?
 
   documentsCreated Document[]  @relation("DocumentCreator")
   documentsSigned  Signature[]
@@ -123,6 +124,7 @@ model Signature {
   nationalIdFrontUrl  String?  // Front page of the National ID/Passport
   nationalIdBackUrl   String?  // Back page of the National ID/Passport
   signatureImage      String?  // The drawn signature in Base64
+  rejectionReason     String?  // Reason if signature is rejected
   verificationStatus  SignatureVerificationStatus @default(VERIFIED) // Verified by default unless video-consent is used
   signatureHash       String   // Hash of the signed intent
   signedAt            DateTime @default(now())

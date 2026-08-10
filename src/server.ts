@@ -500,7 +500,8 @@ app.post('/users/verify', upload.fields([{ name: 'idFront', maxCount: 1 }, { nam
                 nationalIdFrontUrl: finalNationalIdFrontUrl,
                 nationalIdBackUrl: finalNationalIdBackUrl,
                 idType,
-                masterSignatureUrl
+                masterSignatureUrl,
+                kycRejectionReason: null
             }
         });
 
@@ -1368,7 +1369,7 @@ app.get('/admin/users/verifications', async (req: express.Request, res: express.
 app.post('/admin/users/verifications/:id/verify', async (req: express.Request, res: express.Response) => {
     try {
         const { id } = req.params;
-        const { action } = req.body; // 'APPROVE' or 'REJECT'
+        const { action, reason } = req.body; // 'APPROVE' or 'REJECT'
 
         const user = await prisma.user.findUnique({ where: { id } });
         if (!user) {
@@ -1402,18 +1403,17 @@ app.post('/admin/users/verifications/:id/verify', async (req: express.Request, r
 
             await prisma.user.update({
                 where: { id },
-                data: { isVerified: true }
+                data: { isVerified: true, kycRejectionReason: null }
             });
         } else {
-            // Reject - clear out KYC data
+            // Reject - set the rejection reason and clear video so they can re-upload if needed
             await prisma.user.update({
                 where: { id },
                 data: {
                     isVerified: false,
-                    videoUrl: null,
-                    nationalIdFrontUrl: null,
-                    nationalIdBackUrl: null,
-                    masterSignatureUrl: null
+                    kycRejectionReason: reason || 'Your verification was rejected.',
+                    // We don't clear the images automatically so they can see what they submitted
+                    // but they can overwrite them on resubmission.
                 }
             });
         }
@@ -1433,6 +1433,10 @@ app.get('/admin/signatures', async (req: express.Request, res: express.Response)
                     select: { 
                         firstName: true, 
                         lastName: true, 
+                        idType: true,
+                        nationalIdFrontUrl: true,
+                        nationalIdBackUrl: true,
+                        kycRejectionReason: true,
                         email: true, 
                         profileImageUrl: true,
                         masterSignatureUrl: true,
@@ -1483,7 +1487,7 @@ app.get('/admin/signatures/:id', async (req: express.Request, res: express.Respo
 // POST /admin/signatures/:id/verify
 app.post('/admin/signatures/:id/verify', async (req: express.Request, res: express.Response) => {
     const { signatureId } = req.params;
-    const { action } = req.body; // 'APPROVE' or 'REJECT'
+    const { action, reason } = req.body; // 'APPROVE' or 'REJECT'
 
     try {
         const signature = await prisma.signature.findUnique({
@@ -1499,7 +1503,7 @@ app.post('/admin/signatures/:id/verify', async (req: express.Request, res: expre
         if (action === 'APPROVE') {
             await prisma.signature.update({
                 where: { id: signature.id },
-                data: { verificationStatus: 'VERIFIED' }
+                data: { verificationStatus: 'VERIFIED', rejectionReason: null }
             });
 
             // Check if there are any other pending signatures for this document
@@ -1520,7 +1524,10 @@ app.post('/admin/signatures/:id/verify', async (req: express.Request, res: expre
         } else if (action === 'REJECT') {
             await prisma.signature.update({
                 where: { id: signature.id },
-                data: { verificationStatus: 'REJECTED' }
+                data: { 
+                    verificationStatus: 'REJECTED',
+                    rejectionReason: reason || 'Signature verification was rejected.' 
+                }
             });
             // Keep document status as pending or mark as rejected?
             // Usually if one rejects, the document is rejected.
