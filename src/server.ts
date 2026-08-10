@@ -491,36 +491,11 @@ app.post('/users/verify', upload.fields([{ name: 'idFront', maxCount: 1 }, { nam
         let finalNationalIdBackUrl = nationalIdBackUrl;
         let finalVideoUrl = videoUrl;
 
-        try {
-            const coreRes = await fetch(`${coreUrl}/external/identity/verify`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Firma-Api-Key': internalSecret
-                },
-                body: JSON.stringify({
-                    email: authUser.email,
-                    nationalIdFrontUrl,
-                    nationalIdBackUrl,
-                    videoUrl,
-                    idType
-                })
-            });
-
-            if (coreRes.ok) {
-                const coreData = await coreRes.json() as any;
-                if (coreData.nationalIdFrontUrl) finalNationalIdFrontUrl = coreData.nationalIdFrontUrl;
-                if (coreData.nationalIdBackUrl) finalNationalIdBackUrl = coreData.nationalIdBackUrl;
-            }
-        } catch (e) {
-            logger.warn('FIRMA Core unreachable for early verification, proceeding with local Base64 storage.');
-        }
-
-        // Save to user profile
+        // Save to user profile as PENDING (isVerified: false)
         await prisma.user.update({
             where: { id: authUser.id },
             data: {
-                isVerified: true,
+                isVerified: false,
                 videoUrl: finalVideoUrl,
                 nationalIdFrontUrl: finalNationalIdFrontUrl,
                 nationalIdBackUrl: finalNationalIdBackUrl,
@@ -1367,6 +1342,88 @@ app.post('/upload-video', upload.single('video'), async (req: express.Request, r
 // ==========================================
 
 // GET /admin/signatures
+// GET /admin/users/verifications - Get all users who have submitted early KYC
+app.get('/admin/users/verifications', async (req: express.Request, res: express.Response) => {
+    try {
+        const users = await prisma.user.findMany({
+            where: {
+                videoUrl: { not: null }
+            },
+            include: {
+                organization: true
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
+        });
+        res.json(users);
+    } catch (error) {
+        logger.error(error as any, 'Get user verifications error');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// POST /admin/users/verifications/:id/verify - Approve or reject user KYC
+app.post('/admin/users/verifications/:id/verify', async (req: express.Request, res: express.Response) => {
+    try {
+        const { id } = req.params;
+        const { action } = req.body; // 'APPROVE' or 'REJECT'
+
+        const user = await prisma.user.findUnique({ where: { id } });
+        if (!user) {
+            res.status(404).json({ message: 'User not found' });
+            return;
+        }
+
+        if (action === 'APPROVE') {
+            // Forward to FIRMA Core if needed
+            const coreUrl = process.env.FIRMA_CORE_URL || 'https://api.firmasafe.com';
+            const internalSecret = process.env.INTERNAL_SECRET || 'firma_internal_secure_123';
+            
+            try {
+                await fetch(`${coreUrl}/external/identity/verify`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Firma-Api-Key': internalSecret
+                    },
+                    body: JSON.stringify({
+                        email: user.email,
+                        nationalIdFrontUrl: user.nationalIdFrontUrl,
+                        nationalIdBackUrl: user.nationalIdBackUrl,
+                        videoUrl: user.videoUrl,
+                        idType: user.idType
+                    })
+                });
+            } catch (e) {
+                logger.warn('Failed to notify FIRMA core of user verification approval');
+            }
+
+            await prisma.user.update({
+                where: { id },
+                data: { isVerified: true }
+            });
+        } else {
+            // Reject - clear out KYC data
+            await prisma.user.update({
+                where: { id },
+                data: {
+                    isVerified: false,
+                    videoUrl: null,
+                    nationalIdFrontUrl: null,
+                    nationalIdBackUrl: null,
+                    masterSignatureUrl: null
+                }
+            });
+        }
+
+        res.json({ message: `User KYC ${action.toLowerCase()}d successfully` });
+    } catch (error) {
+        logger.error(error as any, 'Verify user KYC error');
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
 app.get('/admin/signatures', async (req: express.Request, res: express.Response) => {
     try {
         const signatures = await prisma.signature.findMany({
