@@ -951,6 +951,7 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
                 idType: finalIdType || null,
                 nationalIdFrontUrl: finalNationalIdFrontUrl || null,
                 nationalIdBackUrl: finalNationalIdBackUrl || null,
+                signatureImage: finalSignatureImage || null,
                 verificationStatus: 'PENDING_VERIFICATION',
                 signatureHash,
                 ipAddress: req.ip || '127.0.0.1',
@@ -1434,6 +1435,7 @@ app.get('/admin/signatures', async (req: express.Request, res: express.Response)
                         lastName: true, 
                         email: true, 
                         profileImageUrl: true,
+                        masterSignatureUrl: true,
                         organization: {
                             select: { name: true }
                         }
