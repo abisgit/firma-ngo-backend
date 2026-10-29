@@ -732,7 +732,14 @@ app.get('/projects/:id', async (req: express.Request, res: express.Response) => 
 
         const project = await prisma.project.findUnique({
             where: { id: req.params.id },
-            include: { documents: true }
+            include: { 
+                documents: {
+                    orderBy: [
+                        { updatedAt: 'desc' },
+                        { createdAt: 'desc' }
+                    ]
+                } 
+            }
         });
         
         if (!project || project.organizationId !== user.organizationId) {
@@ -764,8 +771,11 @@ app.get('/documents', async (req: express.Request, res: express.Response) => {
             return;
         }
 
+        const isOrgWideRole = user.role === 'SUPER_ADMIN' || user.role === 'GLOBAL_MANAGER' || user.role === 'COUNTRY_DIRECTOR';
         const documents = await prisma.document.findMany({
-            where: { creatorId: authUser.id },
+            where: isOrgWideRole
+                ? { creator: { organizationId: user.organizationId } }
+                : { creatorId: authUser.id },
             include: {
                 project: true,
                 creator: true,
@@ -776,7 +786,11 @@ app.get('/documents', async (req: express.Request, res: express.Response) => {
                         }
                     }
                 }
-            }
+            },
+            orderBy: [
+                { updatedAt: 'desc' },
+                { createdAt: 'desc' }
+            ]
         });
         res.json(documents);
     } catch (error) {
@@ -898,9 +912,9 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
             include: { organization: true }
         });
 
-        // Use early verified data if available
+        // Use early verified data if available, but prioritize freshly recorded video consent
         const finalSignatureImage = signatureImage || user?.masterSignatureUrl;
-        const finalVideoUrl = user?.isVerified ? user.videoUrl : videoUrl;
+        const finalVideoUrl = videoUrl || (user?.isVerified ? user.videoUrl : null);
         const finalNationalIdFrontUrl = user?.isVerified ? user.nationalIdFrontUrl : nationalIdFrontUrl;
         const finalNationalIdBackUrl = user?.isVerified ? user.nationalIdBackUrl : nationalIdBackUrl;
         const finalIdType = user?.isVerified ? user.idType : idType;
@@ -1012,7 +1026,10 @@ app.post('/documents/:id/sign', async (req: express.Request, res: express.Respon
         // Keep document in PENDING_SIGNATURES until admin approves it
         const updatedDoc = await prisma.document.update({
             where: { id: document.id },
-            data: { status: 'PENDING_SIGNATURES' },
+            data: { 
+                status: 'PENDING_SIGNATURES',
+                updatedAt: new Date()
+            },
             include: {
                 signatures: {
                     include: {
@@ -1131,7 +1148,8 @@ app.post('/documents/:id/anchor', async (req: express.Request, res: express.Resp
                 status: 'ANCHORED',
                 blockchainHash,
                 txId,
-                fileUrl: newFileUrl
+                fileUrl: newFileUrl,
+                updatedAt: new Date()
             }
         });
 
@@ -1518,7 +1536,10 @@ app.post('/admin/signatures/:id/verify', async (req: express.Request, res: expre
                 // All signatures verified, mark document as APPROVED
                 await prisma.document.update({
                     where: { id: signature.documentId },
-                    data: { status: 'APPROVED' }
+                    data: { 
+                        status: 'APPROVED',
+                        updatedAt: new Date()
+                    }
                 });
             }
         } else if (action === 'REJECT') {
